@@ -656,6 +656,39 @@ fn discharge_call_pred(
     }
 }
 
+/// [GAP5-INV2] Toolchain identity for INV-2 keying: any durable result must
+/// be invalidated when the compiler or solver changes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ToolchainId {
+    pub vera_version: String,
+    /// Solver identity incl. version, e.g. "z3-4.16.0".
+    pub solver_id: String,
+}
+
+impl ToolchainId {
+    pub fn current(solver_id: impl Into<String>) -> Self {
+        Self {
+            vera_version: env!("CARGO_PKG_VERSION").into(),
+            solver_id: solver_id.into(),
+        }
+    }
+}
+
+/// [GAP5-INV2] The INV-2 cache-key scheme (design pilot — NO durable store
+/// yet): every future persisted result (proof certificate, FixPatch, memo)
+/// must be keyed by content hash PLUS toolchain identity so an upgrade can
+/// never serve a stale verdict (SPEC INV-2 / §6.4). D's in-process ProvedSet
+/// intentionally carries no key: it dies with the process. Full scheme:
+/// docs/pilot/GAP5_INV2_DESIGN_NOTE.md.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ProofCacheKey {
+    /// Content hash of the definition the result is about (store hash).
+    pub definition_hash: String,
+    /// Query kind, e.g. "prove/ensures[0]", "typecheck", "fixpatch".
+    pub query_kind: String,
+    pub toolchain: ToolchainId,
+}
+
 /// Generate and discharge all Phase-2-slice obligations for a program.
 pub fn prove_program(program: &Program) -> Result<Vec<Obligation>, VcError> {
     let mut out = Vec::new();
@@ -703,6 +736,33 @@ pub fn format_report(path: &str, obligations: &[Obligation]) -> String {
 mod tests {
     use super::*;
     use crate::{check_program, parse};
+
+    #[test]
+    fn gap5_inv2_key_distinguishes_toolchains() {
+        // [GAP5-INV2] the same definition + query under a bumped solver must
+        // be a DIFFERENT key (no stale verdicts across upgrades).
+        let a = ProofCacheKey {
+            definition_hash: "abc123".into(),
+            query_kind: "prove/ensures[0]".into(),
+            toolchain: ToolchainId::current("z3-4.16.0"),
+        };
+        let same = ProofCacheKey {
+            definition_hash: "abc123".into(),
+            query_kind: "prove/ensures[0]".into(),
+            toolchain: ToolchainId::current("z3-4.16.0"),
+        };
+        let bumped_solver = ProofCacheKey {
+            toolchain: ToolchainId::current("z3-4.17.0"),
+            ..a.clone()
+        };
+        let other_def = ProofCacheKey {
+            definition_hash: "def456".into(),
+            ..a.clone()
+        };
+        assert_eq!(a, same);
+        assert_ne!(a, bumped_solver);
+        assert_ne!(a, other_def);
+    }
 
     #[test]
     fn clamp_return_refine_proved() {
