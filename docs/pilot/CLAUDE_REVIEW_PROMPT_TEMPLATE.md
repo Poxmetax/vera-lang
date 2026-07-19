@@ -1,4 +1,4 @@
-﻿<!--
+<!--
 Operator note (Estonian):
 Madis — kopeeri sellest mallist uus CLAUDE_REVIEW_<TOPIC>.md fail iga kord,
 kui annad Claude'ile (Fable 5 / Claude Code) ülevaatuseks midagi.
@@ -145,8 +145,11 @@ topic-specific: ...
 
 ## How to mint a new review file
 
-1. Copy this template → `docs/pilot/CLAUDE_REVIEW_<TOPIC>.md`
-2. Fill Meta + §§1–4 with **real** state from the slice/handoff/`git status`
-3. Paste that file into a **new** Claude review session (not an implementation handoff)
-4. Implementation handoffs stay in `FABLE5_*_HANDOFF_PROMPT.md` (or similar)
+**Standing paste rule:** Madis pastes a short **POINTER** into Claude chat -- not this full template body. See [`CLAUDE_POINTER_PROMPT_TEMPLATE.md`](CLAUDE_POINTER_PROMPT_TEMPLATE.md). Full detail stays on disk (this file / `CLAUDE_REVIEW_<TOPIC>.md` sections 0-6).
+
+1. Copy this template -> `docs/pilot/CLAUDE_REVIEW_<TOPIC>.md`
+2. Fill Meta + sections 1-4 with **real** state from the slice/handoff/`git status`
+3. Mint short pointer `docs/pilot/CLAUDE_POINTER_<TOPIC>_REVIEW.md` (role + read-order + must-do + return format)
+4. Madis pastes **only** the POINTER into a **new** Claude review session; Claude reads the full review file from disk
+5. Implementation: full handoff in `FABLE5_*_HANDOFF_PROMPT.md`; chat paste = `CLAUDE_POINTER_*_IMPLEMENT.md` (never the full handoff body)
 

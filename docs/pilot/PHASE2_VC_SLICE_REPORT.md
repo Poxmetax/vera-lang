@@ -26,8 +26,8 @@ Expected: ≥1 `[PROVED]` on `clamp` return refine and/or ensures; call-site `lo
 - **REQ-REFINE-1 call-site + closed definition-time:** [P2-REFINE1] / [P2-REFINE1-DEF] in typecheck.rs (see docs/pilot/P2_REFINE1_SLICE.md). Requires-guided / param-dependent bodies still soft.
 - **Task B structured diagnostics: delivered** as `[P2B-DIAG]` — `--diag-json` CLI mode + documented entrypoints `diagnose_source` / `diagnose_program` (`crates/vera/src/diag.rs`); prove tiers (proved / runtime-checked / refuted) machine-readable with source spans; refuted ⇒ `severity: error`, exit 3; default text paths byte-identical (see [`P2B_DIAG_SLICE.md`](P2B_DIAG_SLICE.md)).
 - Full SMT-backed refine reject for non-literal args (still REFUTED/RUNTIME via --prove only).
-- **REQ-REFINE-2** / `len` measures on `List`.
-- Label lattice / IFC, JSON `FixPatch`, multi-prover (CVC5), proof certificates / check elision in the interpreter.
+- **REQ-REFINE-2** / `len`: decided-literal fragment landed (`[P2-REFINE2]`, see [`P2C_LEN_SLICE.md`](P2C_LEN_SLICE.md)); SMT `len`-encode still open; symbolic `len(xs)`-as-index deferred.
+- Label lattice / IFC, JSON `FixPatch`, multi-prover (CVC5), durable proof certificates (INV-2). Interpreter check-elision for **fn-level** PROVED obligations landed (`[P2D-ELIDE]`, `--prove-run`); call-site elision still open -- see [`KNOWN_GAPS.md`](KNOWN_GAPS.md). **Nuance:** GAP-4 (`d4aebd3`) landed lattice-math evidence only -- not IFC / R2 ergonomics / CONF-P2 label gate ([`GAP4_R2_PILOT_SLICE.md`](GAP4_R2_PILOT_SLICE.md)). GAP-5 (`23f2e46`) designed INV-2 typed key -- FixPatch stays ephemeral until keys wired ([`GAP5_INV2_DESIGN_NOTE.md`](GAP5_INV2_DESIGN_NOTE.md)); durable store = GAP-D2.
 - Linking the `z3` crate for in-process solving (optional later; subprocess is intentional).
 
 ## Verify

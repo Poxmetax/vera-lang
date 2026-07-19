@@ -1,4 +1,4 @@
-﻿# VERA-lang commit checklist (operator)
+# VERA-lang commit checklist (operator)
 
 **Date:** 2026-07-19  
 **Scope:** Next `vera-lang/` commit only. Soft track resumes post soft-FREEZE with a **no-rename** rule.
@@ -17,7 +17,7 @@ Do this **immediately before** `git add` / commit — not earlier in the session
 
 | Check | Expect |
 |-------|--------|
-| `cargo test -p vera --lib` | **22** tests pass (soft-freeze baseline 7 + `[P2-REFINE1]`/`[P2-REFINE1-DEF]` 7 + `[P2-SOUND3]` 3 + `[P2B-DIAG]` 5) |
+| `cargo test -p vera --lib` | **50** tests pass (post gaps-before-E GAP-1..5; was 44 after GAP-2) |
 | `examples/prove_clamp.vera` | summary contains **`6 proved`**, exit **0** |
 | `examples/prove_runtime_hint.vera` | at least one **`[RUNTIME-CHECKED]`**, exit **0** |
 | `examples/prove_refuted.vera` | **`[REFUTED]`**, exit **3** |
@@ -28,7 +28,7 @@ Do this **immediately before** `git add` / commit — not earlier in the session
 - Soft track was **frozen** mid-review because parallel soft work raced Fable 5 CONF-P2.
 - Madis resumed with **"hästi, jätka"** — continue carefully.
 - **Never rename files** during soft work (especially `examples/`). No `_probe_*` temps that later get renamed; new files use **final names only**.
-- **Do not edit** Fable-owned: `vc.rs`, `smt.rs`, `typecheck.rs`, `interp.rs`.
+- **Do not edit** Fable-owned: `vc.rs`, `smt.rs`, `typecheck.rs`, `interp.rs`, **`diag.rs`**.
 - No parallel soft renames during review.
 
 ## Soft artifacts to include (from `git status --short -- vera-lang/`)
@@ -47,6 +47,9 @@ Paths as of 2026-07-19 soft resume (re-run `git status --short -- vera-lang/` be
 - `vera-lang/docs/pilot/COMMIT_CHECKLIST.md` (this file)
 - `vera-lang/mcp/README.md` — Phase 3 MCP stub (docs only; `[SOFT-MCP-STUB]`)
 - `vera-lang/docs/pilot/FABLE5_CONF_P2_HANDOFF_PROMPT.md` (handoff; ok in same commit if Madis wants docs together)
+- `vera-lang/docs/pilot/CURSOR_SYNC_ACK_P2AB.md` (Cursor sync ACK A+B)
+- `vera-lang/docs/pilot/FABLE5_CONF_P2C_HANDOFF_PROMPT.md` (task C implement handoff)
+- `vera-lang/docs/pilot/CLAUDE_REVIEW_P2C_LEN.md` (task C post-land review)
 - `vera-lang/docs/pilot/PHASE12_REVIEW_FINDINGS.md`
 - `vera-lang/docs/pilot/PHASE2_VC_SLICE_REPORT.md` (modified — include only if review agrees)
 
@@ -64,7 +67,9 @@ Paths as of 2026-07-19 soft resume (re-run `git status --short -- vera-lang/` be
 
 ## Soft track status
 
-**Claude review (standing rule):** when pasting a review to Claude, use [CLAUDE_REVIEW_PROMPT_TEMPLATE.md](CLAUDE_REVIEW_PROMPT_TEMPLATE.md) / current [CLAUDE_REVIEW_P2_REFINE1.md](CLAUDE_REVIEW_P2_REFINE1.md) — not the Fable implementation handoff.
+**Claude paste rule:** Paste POINTER files to Claude, not full handoffs. Template: [CLAUDE_POINTER_PROMPT_TEMPLATE.md](CLAUDE_POINTER_PROMPT_TEMPLATE.md). Review full bodies still live in [CLAUDE_REVIEW_PROMPT_TEMPLATE.md](CLAUDE_REVIEW_PROMPT_TEMPLATE.md) / topic files (e.g. [CLAUDE_REVIEW_P2_REFINE1_DEF.md](CLAUDE_REVIEW_P2_REFINE1_DEF.md); next C full: [CLAUDE_REVIEW_P2C_LEN.md](CLAUDE_REVIEW_P2C_LEN.md)).
+
+**Sync:** [CURSOR_SYNC_ACK_GAPS_BEFORE_E.md](CURSOR_SYNC_ACK_GAPS_BEFORE_E.md) (campaign complete, baseline **50**; E **GREEN-LIT** Madis 2026-07-20); prior [CURSOR_SYNC_ACK_GAP2.md](CURSOR_SYNC_ACK_GAP2.md) / [CURSOR_SYNC_ACK_P2_DUPFN.md](CURSOR_SYNC_ACK_P2_DUPFN.md). Soft smoke expects **50** tests. Debt: [KNOWN_GAPS.md](KNOWN_GAPS.md). Soft commit candidates: this checklist + README + queue + pointers + ACK + KNOWN_GAPS (Madis commits; no auto push).
 
 
-See [`SOFT_PARALLEL_QUEUE.md`](SOFT_PARALLEL_QUEUE.md): **ACTIVE (post-freeze, no-rename rule)**. Soft feature queue is **exhausted** pending Fable CONF-P2 / Madis new soft items.
+See [`SOFT_PARALLEL_QUEUE.md`](SOFT_PARALLEL_QUEUE.md): **ACTIVE (post-freeze, no-rename rule)**. Gaps-before-E complete; Task E **GREEN-LIT** (Madis 2026-07-20).

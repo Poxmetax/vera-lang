@@ -16,6 +16,7 @@ One-line index of examples/*.vera. Prove demos need Z3 on PATH (see repo README)
 | prove_runtime_hint.vera | --prove: Str ensures -> [RUNTIME-CHECKED] |
 | prove_refuted.vera | --prove: false Int ensures -> [REFUTED], exit 3 |
 | refine_call_ok.vera | [P2-REFINE1] in-range refined calls typecheck+run |
+| refine_len_ok.vera | [P2-REFINE2] in-range `nth` + `len` measure; prints 20 |
 
 Soft ownership / queue: docs/pilot/SOFT_PARALLEL_QUEUE.md
 Soft smoke: docs/pilot/soft_smoke.ps1
