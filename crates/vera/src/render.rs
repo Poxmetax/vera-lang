@@ -151,7 +151,43 @@ pub fn render_expr(e: &Expr) -> String {
     render_expr_prec(e, 0, 0)
 }
 
-fn render_expr_prec(e: &Expr, _prec: i32, depth: usize) -> String {
+/// [GAP3-RENDER-PAREN] Binding strength of an expression form as an operand.
+/// Mirrors the parser's ladder (SPEC §3.1 / parser.rs): if/match/lambda (0)
+/// < `||` (1) < `&&` (2) < comparisons (3, NON-associative: one optional
+/// rel_op) < `+ - ++` (4) < `* / %` (5) < unary (6) < postfix (7) < atoms (8).
+fn prec_of(e: &Expr) -> i32 {
+    match e {
+        Expr::IfExpr { .. } | Expr::MatchExpr { .. } | Expr::Lambda { .. } => 0,
+        Expr::BinOp { op, .. } => bin_prec(op),
+        Expr::UnaryOp { .. } => 6,
+        Expr::Call { .. } | Expr::FieldAccess { .. } | Expr::Propagate { .. } => 7,
+        _ => 8,
+    }
+}
+
+fn bin_prec(op: &str) -> i32 {
+    match op {
+        "||" => 1,
+        "&&" => 2,
+        "==" | "!=" | "<" | "<=" | ">" | ">=" => 3,
+        "+" | "-" | "++" => 4,
+        _ => 5, // * / %
+    }
+}
+
+/// [GAP3-RENDER-PAREN] `min_prec` is the weakest binding allowed unwrapped in
+/// this position; a child that binds weaker is parenthesized so the rendered
+/// text re-parses to the identical AST (CONF-P1 round-trip, PHASE12 F5).
+fn render_expr_prec(e: &Expr, min_prec: i32, depth: usize) -> String {
+    let s = render_expr_raw(e, depth);
+    if prec_of(e) < min_prec {
+        format!("({s})")
+    } else {
+        s
+    }
+}
+
+fn render_expr_raw(e: &Expr, depth: usize) -> String {
     match e {
         Expr::LitInt { value, .. } => value.to_string(),
         Expr::LitBool { value, .. } => if *value { "true" } else { "false" }.into(),
@@ -212,24 +248,33 @@ fn render_expr_prec(e: &Expr, _prec: i32, depth: usize) -> String {
         }
         Expr::BinOp {
             op, left, right, ..
-        } => format!(
-            "{} {} {}",
-            render_expr_prec(left, 0, depth),
-            op,
-            render_expr_prec(right, 0, depth)
-        ),
+        } => {
+            // [GAP3-RENDER-PAREN] left-assoc: equal-prec LEFT child stays bare,
+            // equal-prec RIGHT child needs parens (`a - (b - c)`); comparisons
+            // are non-associative, so BOTH cmp children need parens.
+            let p = bin_prec(op);
+            let lmin = if p == 3 { p + 1 } else { p };
+            format!(
+                "{} {} {}",
+                render_expr_prec(left, lmin, depth),
+                op,
+                render_expr_prec(right, p + 1, depth)
+            )
+        }
         Expr::UnaryOp { op, expr, .. } => {
-            format!("{op}{}", render_expr_prec(expr, 0, depth))
+            // [GAP3-RENDER-PAREN] operand must bind at postfix strength:
+            // `-(a + b)`, `-(-x)` (the grammar's unary prefix is single).
+            format!("{op}{}", render_expr_prec(expr, 7, depth))
         }
         Expr::Call { callee, args, .. } => {
             let a: Vec<String> = args
                 .iter()
                 .map(|x| render_expr_prec(x, 0, depth))
                 .collect();
-            format!("{}({})", render_expr_prec(callee, 0, depth), a.join(", "))
+            format!("{}({})", render_expr_prec(callee, 7, depth), a.join(", "))
         }
         Expr::FieldAccess { obj, field, .. } => {
-            format!("{}.{}", render_expr_prec(obj, 0, depth), field)
+            format!("{}.{}", render_expr_prec(obj, 7, depth), field)
         }
         Expr::IfExpr {
             cond,
@@ -272,8 +317,48 @@ fn render_expr_prec(e: &Expr, _prec: i32, depth: usize) -> String {
         Expr::Block(b) => render_block(b, depth),
         Expr::Hole { name, .. } => format!("?{name}"),
         Expr::Propagate { expr, .. } => {
-            format!("{}?", render_expr_prec(expr, 0, depth))
+            format!("{}?", render_expr_prec(expr, 7, depth))
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::store::CodebaseStore;
+
+    // [GAP3-RENDER-PAREN] shapes that FAILED round-trip before this slice
+    // (PHASE12 F5 probe class) and must survive render -> parse -> hash now.
+    #[test]
+    fn gap3_mixed_precedence_shapes_round_trip() {
+        let src = r#"
+fn main(console: Console) -> Unit uses {console} {
+    let _a: Int = (1 + 2) * 3;
+    let _b: Int = 1 - (2 - 3);
+    let _c: Bool = (true || false) && true;
+    let _d: Bool = (1 < 2) == true;
+    let _e: Int = -(1 + 2);
+    let _f: Str = (1 + 2).show();
+    console.print(_f);
+}
+"#;
+        CodebaseStore::round_trip_ok(src).expect("mixed-precedence round trip");
+    }
+
+    #[test]
+    fn gap3_no_redundant_parens_on_natural_precedence() {
+        // Hash identity alone cannot catch over-parenthesization (redundant
+        // parens re-parse to the same AST), so pin the rendered text too.
+        let src = r#"
+fn main(console: Console) -> Unit uses {console} {
+    let _a: Int = 1 + 2 * 3;
+    let _b: Int = (1 + 2) * 3;
+    console.print("k");
+}
+"#;
+        let prog = crate::parse(src).expect("parse");
+        let out = crate::render_program(&prog);
+        assert!(out.contains("let _a: Int = 1 + 2 * 3;"), "over-parenthesized: {out}");
+        assert!(out.contains("let _b: Int = (1 + 2) * 3;"), "lost parens: {out}");
     }
 }
 
