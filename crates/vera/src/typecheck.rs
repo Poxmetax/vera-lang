@@ -67,11 +67,20 @@ pub fn check_program(program: &Program) -> Result<(), TypeError> {
         adt.enums.insert(e.name.clone(), e.clone());
     }
 
-    let fns: HashMap<String, FnDecl> = program
-        .functions
-        .iter()
-        .map(|f| (f.name.clone(), f.clone()))
-        .collect();
+    // [P2-DUPFN] Reject duplicate function names (mirrors the duplicate-type
+    // check above). Before this, a later `fn f` silently shadowed an earlier
+    // one at runtime (last declaration wins in every name-keyed map), which
+    // poisons name-keyed reasoning like the [P2D-ELIDE] proved set.
+    let mut fns: HashMap<String, FnDecl> = HashMap::new();
+    for f in &program.functions {
+        if fns.contains_key(&f.name) {
+            return Err(TypeError::at(
+                f.span,
+                format!("[P2-DUPFN] duplicate function {}", f.name),
+            ));
+        }
+        fns.insert(f.name.clone(), f.clone());
+    }
     if !fns.contains_key("main") {
         return Err(TypeError("program must define fn main".into()));
     }
@@ -1518,6 +1527,27 @@ fn main(console: Console) -> Unit uses {console} {
             err.0.contains("[P2-REFINE2]"),
             "expected [P2-REFINE2] in {err}"
         );
+    }
+
+    #[test]
+    fn dupfn_rejects_duplicate_function_names() {
+        // [P2-DUPFN] a later `fn f` used to silently shadow an earlier one at
+        // runtime; now it is a compile-time error at the second declaration.
+        let src = r#"
+fn f() -> Int {
+    1
+}
+fn f() -> Int {
+    2
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(f().show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected P2-DUPFN reject");
+        assert!(err.0.contains("[P2-DUPFN]"), "{err}");
+        assert!(err.0.contains("duplicate function f"), "{err}");
     }
 
     #[test]

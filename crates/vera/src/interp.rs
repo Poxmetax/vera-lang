@@ -983,8 +983,12 @@ fn main(console: Console) -> Unit uses {console} {
 
     #[test]
     fn elide_excludes_duplicate_fn_names() {
-        // The interpreter resolves calls by name (last decl wins), so a proof
-        // for one duplicate must never elide checks on the other.
+        // [P2-DUPFN] check_program now rejects duplicate fn names at the front
+        // door, so this test skips typecheck on purpose: it exercises the
+        // ProvedSet defense-in-depth for API callers that go straight to
+        // prove_program / Interpreter (neither requires check_program). The
+        // interpreter resolves calls by name (last decl wins), so a proof for
+        // one duplicate must never elide checks on the other.
         let src = r#"
 fn f() -> {r: Int | r >= 0} {
     1
@@ -996,7 +1000,13 @@ fn main(console: Console) -> Unit uses {console} {
     console.print(f().show());
 }
 "#;
-        let (prog, proved) = prove_and_build(src);
+        let prog = parse(src).expect("parse");
+        assert!(
+            check_program(&prog).is_err(),
+            "typecheck front door must reject dup-fn ([P2-DUPFN])"
+        );
+        let obs = crate::vc::prove_program(&prog).expect("prove");
+        let proved = ProvedSet::build(&prog, &obs);
         assert!(
             !proved.return_refine_proved("f"),
             "duplicated fn name must be excluded from the proved set"
