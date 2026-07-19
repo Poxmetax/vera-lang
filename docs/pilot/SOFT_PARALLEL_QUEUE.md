@@ -8,7 +8,7 @@
 | ID | Task | Notes |
 |----|------|-------|
 | A | REQ-REFINE-1 hard typecheck reject | **done (closed fragment)** — call-site `[P2-REFINE1]` + def-time `[P2-REFINE1-DEF]` (2026-07-19); requires-guided/param bodies still soft |
-| B | prove ↔ typecheck diagnostics | structured proved/runtime/refuted |
+| B | prove ↔ typecheck diagnostics | **done** — `[P2B-DIAG]` `--diag-json` + `diagnose_source`/`diagnose_program` (2026-07-19); FixPatch stays task E |
 | C | REQ-REFINE-2 + `len` measures | List bounds |
 | D | INV-1 check-elision | interpreter skips only when proved |
 | E | FixPatch JSON diagnostics | machine-readable patches |

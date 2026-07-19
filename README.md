@@ -15,7 +15,7 @@ The goal, in one line: **the language an LLM writes with the fewest shipped bugs
   - typed edit transactions (U16): stale-base reject + typecheck-gated commit (`EditTransaction`)
   - typed holes `?ident` parse (unfilled = type/runtime error; synthesis later S1)
   - postfix `?` Option/Result propagation (enclosing return type checked, `[P2-SOUND3]`)
-  - **Phase 2 (thin VC slice): in progress.** Z3 via SMT-LIB2 subprocess; `vera --prove` discharges Int/bool/`ite` requires·ensures·`{x:Int|pred}` (see [`docs/pilot/PHASE2_VC_SLICE_REPORT.md`](docs/pilot/PHASE2_VC_SLICE_REPORT.md)). REQ-REFINE-1 call-site + closed definition-time return refine landed ([P2-REFINE1] / [P2-REFINE1-DEF]); full CONF-P2 / REQ-REFINE-2 / prove↔typecheck (B) still open. See docs/pilot/P2_REFINE1_SLICE.md. Review: [`CLAUDE_REVIEW_P2_REFINE1_DEF.md`](docs/pilot/CLAUDE_REVIEW_P2_REFINE1_DEF.md) (template: [`CLAUDE_REVIEW_PROMPT_TEMPLATE.md`](docs/pilot/CLAUDE_REVIEW_PROMPT_TEMPLATE.md)).
+  - **Phase 2 (thin VC slice): in progress.** Z3 via SMT-LIB2 subprocess; `vera --prove` discharges Int/bool/`ite` requires·ensures·`{x:Int|pred}` (see [`docs/pilot/PHASE2_VC_SLICE_REPORT.md`](docs/pilot/PHASE2_VC_SLICE_REPORT.md)). REQ-REFINE-1 call-site + closed definition-time return refine landed ([P2-REFINE1] / [P2-REFINE1-DEF]); structured pipeline diagnostics landed ([P2B-DIAG], `--diag-json`, [`docs/pilot/P2B_DIAG_SLICE.md`](docs/pilot/P2B_DIAG_SLICE.md)); full CONF-P2 / REQ-REFINE-2 still open. See docs/pilot/P2_REFINE1_SLICE.md. Review: [`CLAUDE_REVIEW_P2_REFINE1_DEF.md`](docs/pilot/CLAUDE_REVIEW_P2_REFINE1_DEF.md) (template: [`CLAUDE_REVIEW_PROMPT_TEMPLATE.md`](docs/pilot/CLAUDE_REVIEW_PROMPT_TEMPLATE.md)).
 - **Phase 3 MCP stub (docs only):** [mcp/README.md](mcp/README.md) — planned typecheck/prove compiler-service surface (CONF-P3 / DP8). No server code yet.
 
 ### Remaining → Fable 5 (CONF-P2 hard work)
@@ -40,6 +40,7 @@ cargo run -p vera -- --prove examples/prove_clamp.vera
 cargo run -p vera -- --prove examples/prove_runtime_hint.vera  # expect [RUNTIME-CHECKED]
 cargo run -p vera -- --prove examples/prove_refuted.vera       # expect [REFUTED], exit 3
 cargo run -p vera -- examples/refine_call_ok.vera              # in-range refined calls run
+cargo run -p vera -- --prove --diag-json examples/prove_refuted.vera  # machine-readable diagnostics JSON
 ```
 
 Optional flags: `--hash-only`, `--dump-ast`, `--prove` (Phase 2 VC discharge).

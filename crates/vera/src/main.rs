@@ -12,13 +12,17 @@ use vera::{check_program, format_report, parse, prove_program, CodebaseStore, Di
 fn usage() {
     // [SOFT-PROVE-HELP] clearer Phase-2 flag description for operators / Fable handoff
     eprintln!(
-        "usage: vera <file.vera> [--hash-only] [--dump-ast] [--round-trip] [--prove]"
+        "usage: vera <file.vera> [--hash-only] [--dump-ast] [--round-trip] [--prove] [--diag-json]"
     );
     eprintln!(
         "  --prove   Phase 2 VC slice: discharge Int/bool/ite requires·ensures·{{x:Int|pred}} via Z3"
     );
     eprintln!(
         "            prints [PROVED] / [RUNTIME-CHECKED] / [REFUTED] (exit 3 if any REFUTED)"
+    );
+    // [P2B-DIAG] machine-readable diagnostics mode
+    eprintln!(
+        "  --diag-json  structured JSON diagnostics (parse+typecheck; with --prove also obligations); does not run the program"
     );
     // [SOFT-EXIT-HELP] document CLI exit codes (trap=2, refute=3)
     eprintln!(
@@ -36,6 +40,7 @@ fn main() -> ExitCode {
     let mut dump_ast = false;
     let mut round_trip = false;
     let mut prove = false;
+    let mut diag_json = false;
     args.retain(|a| match a.as_str() {
         "--hash-only" => {
             hash_only = true;
@@ -51,6 +56,10 @@ fn main() -> ExitCode {
         }
         "--prove" => {
             prove = true;
+            false
+        }
+        "--diag-json" => {
+            diag_json = true;
             false
         }
         _ => true,
@@ -79,6 +88,16 @@ fn main() -> ExitCode {
                 return ExitCode::from(1);
             }
         }
+    }
+
+    // [P2B-DIAG] machine-readable pipeline diagnostics; does not execute the program.
+    if diag_json {
+        let report = vera::diag::diagnose_source(&path.display().to_string(), &source, prove);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).expect("DiagReport serializable")
+        );
+        return ExitCode::from(report.exit_code());
     }
 
     let program = match parse(&source) {

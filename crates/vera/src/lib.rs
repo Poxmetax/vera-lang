@@ -4,6 +4,7 @@
 //! Phase 2 slice: `--prove` discharges requires/ensures / `{x:Int|pred}` via Z3 SMT-LIB2.
 
 pub mod ast;
+pub mod diag;
 pub mod interp;
 pub mod lexer;
 pub mod parser;
@@ -13,6 +14,7 @@ pub mod store;
 pub mod typecheck;
 pub mod vc;
 
+pub use diag::{diagnose_program, diagnose_source, DiagReport, Diagnostic};
 pub use interp::{Console, Interpreter, Trap};
 pub use parser::{parse, ParseError};
 pub use render::render_program;

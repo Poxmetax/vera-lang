@@ -32,6 +32,9 @@ pub struct Obligation {
     pub target: String,
     pub kind: String,
     pub status: Discharge,
+    /// [P2B-DIAG] Source anchor: the fn declaration span for fn-level
+    /// obligations, the call expression span for call-site obligations.
+    pub span: Option<Span>,
 }
 
 fn encode_expr(expr: &Expr) -> Result<String, String> {
@@ -263,6 +266,7 @@ fn prove_fn(fn_decl: &FnDecl, out: &mut Vec<Obligation>) {
                     status: Discharge::RuntimeChecked {
                         reason: reason.clone(),
                     },
+                    span: Some(fn_decl.span),
                 });
             }
             if let Type::Refine { pred: Some(_), .. } = &fn_decl.ret {
@@ -270,6 +274,7 @@ fn prove_fn(fn_decl: &FnDecl, out: &mut Vec<Obligation>) {
                     target: format!("{} return refine", fn_decl.name),
                     kind: "return_refine".into(),
                     status: Discharge::RuntimeChecked { reason },
+                    span: Some(fn_decl.span),
                 });
             }
             return;
@@ -286,6 +291,7 @@ fn prove_fn(fn_decl: &FnDecl, out: &mut Vec<Obligation>) {
             target: format!("{} ensures[{i}]", fn_decl.name),
             kind: "ensures".into(),
             status,
+            span: Some(fn_decl.span),
         });
     }
 
@@ -309,6 +315,7 @@ fn prove_fn(fn_decl: &FnDecl, out: &mut Vec<Obligation>) {
             target: format!("{} return refine {{{name}: Int | …}}", fn_decl.name),
             kind: "return_refine".into(),
             status,
+            span: Some(fn_decl.span),
         });
     }
 }
@@ -349,13 +356,13 @@ fn walk_expr_calls(
     out: &mut Vec<Obligation>,
 ) {
     match expr {
-        Expr::Call { callee, args, .. } => {
+        Expr::Call { callee, args, span } => {
             for a in args {
                 walk_expr_calls(a, fns, caller, out);
             }
             if let Expr::Name { name, .. } = callee.as_ref() {
                 if let Some(callee_fn) = fns.get(name.as_str()) {
-                    prove_call_site(caller, callee_fn, args, out);
+                    prove_call_site(caller, callee_fn, args, *span, out);
                 }
             }
             walk_expr_calls(callee, fns, caller, out);
@@ -419,7 +426,13 @@ fn expr_is_closed(expr: &Expr) -> bool {
     }
 }
 
-fn prove_call_site(caller: &str, callee: &FnDecl, args: &[Expr], out: &mut Vec<Obligation>) {
+fn prove_call_site(
+    caller: &str,
+    callee: &FnDecl,
+    args: &[Expr],
+    call_span: Span,
+    out: &mut Vec<Obligation>,
+) {
     if args.len() != callee.params.len() {
         return;
     }
@@ -437,6 +450,7 @@ fn prove_call_site(caller: &str, callee: &FnDecl, args: &[Expr], out: &mut Vec<O
                     reason: "argument is not a closed literal term (caller-context WP not in Phase 2 slice)"
                         .into(),
                 },
+                span: Some(call_span),
             });
         }
         return;
@@ -456,6 +470,7 @@ fn prove_call_site(caller: &str, callee: &FnDecl, args: &[Expr], out: &mut Vec<O
                         target: format!("{caller} call {} (args)", callee.name),
                         kind: "call_requires".into(),
                         status: Discharge::RuntimeChecked { reason },
+                        span: Some(call_span),
                     });
                 }
                 return;
@@ -473,6 +488,7 @@ fn prove_call_site(caller: &str, callee: &FnDecl, args: &[Expr], out: &mut Vec<O
             target: format!("{caller} → {} requires[{i}]", callee.name),
             kind: "call_requires".into(),
             status,
+            span: Some(call_span),
         });
     }
 
@@ -490,6 +506,7 @@ fn prove_call_site(caller: &str, callee: &FnDecl, args: &[Expr], out: &mut Vec<O
                 target: format!("{caller} → {} arg `{}` refine", callee.name, p.name),
                 kind: "call_arg_refine".into(),
                 status,
+                span: Some(call_span),
             });
         }
     }

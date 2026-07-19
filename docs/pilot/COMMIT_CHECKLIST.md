@@ -17,7 +17,7 @@ Do this **immediately before** `git add` / commit — not earlier in the session
 
 | Check | Expect |
 |-------|--------|
-| `cargo test -p vera --lib` | **17** tests pass (soft-freeze baseline 7 + `[P2-REFINE1]`/`[P2-REFINE1-DEF]` 7 + `[P2-SOUND3]` 3) |
+| `cargo test -p vera --lib` | **22** tests pass (soft-freeze baseline 7 + `[P2-REFINE1]`/`[P2-REFINE1-DEF]` 7 + `[P2-SOUND3]` 3 + `[P2B-DIAG]` 5) |
 | `examples/prove_clamp.vera` | summary contains **`6 proved`**, exit **0** |
 | `examples/prove_runtime_hint.vera` | at least one **`[RUNTIME-CHECKED]`**, exit **0** |
 | `examples/prove_refuted.vera` | **`[REFUTED]`**, exit **3** |
