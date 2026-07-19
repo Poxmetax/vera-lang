@@ -105,8 +105,14 @@ fn check_fn(
     }
     let mut vars = HashMap::new();
     for p in &fn_decl.params {
+        // [GAP2-REFINE-TC] insert-then-check gives prefix scoping that matches
+        // the interpreter's binding order: param i's pred sees params 0..=i
+        // (a forward reference would be an unbound-name trap at runtime).
         vars.insert(p.name.clone(), p.ty.clone());
+        check_type_refines(&p.ty, &vars)?;
     }
+    // [GAP2-REFINE-TC] the return refine sees the full parameter scope.
+    check_type_refines(&fn_decl.ret, &vars)?;
     let env = Env {
         vars,
         fns,
@@ -160,6 +166,9 @@ fn check_block(block: &Block, env: &Env<'_>) -> Result<Type, TypeError> {
                     },
                 )?;
                 if let Some(annot) = ty {
+                    // [GAP2-REFINE-TC] let-annotation refines are runtime-inert
+                    // but still fragment-checked (visible bindings in scope).
+                    check_type_refines(annot, &e_vars)?;
                     if !types_equal(&vty, annot) {
                         return Err(TypeError::at(
                             *span,
@@ -840,6 +849,139 @@ fn erase_refine(t: &Type) -> Type {
     }
 }
 
+/// [GAP2-REFINE-TC] Definition-time typecheck of one refinement predicate
+/// against the SPEC §3 fragment: a Bool expression over the binder, names in
+/// `scope` (params / visible bindings; refine-typed names read as Int),
+/// Int/Bool literals, unary `-`/`!`, Int arithmetic, Int comparisons,
+/// `&&`/`||`, and the `len(<List-typed expr>)` measure. Anything else is a
+/// compile-time error here instead of a runtime trap (or silent inert junk).
+fn check_refine_pred_ty(
+    pred: &Expr,
+    binder: &str,
+    scope: &HashMap<String, Type>,
+) -> Result<Type, TypeError> {
+    match pred {
+        Expr::LitInt { .. } => Ok(Type::Int),
+        Expr::LitBool { .. } => Ok(Type::Bool),
+        Expr::Name { name, span } => {
+            if name == binder {
+                return Ok(Type::Int);
+            }
+            match scope.get(name) {
+                Some(t) => Ok(erase_refine(t)),
+                None => Err(TypeError::at(
+                    *span,
+                    format!(
+                        "[GAP2-REFINE-TC] unknown name {name:?} in refinement predicate \
+                         (in scope: binder + parameters declared before this one)"
+                    ),
+                )),
+            }
+        }
+        Expr::UnaryOp { op, expr, span } => {
+            let t = check_refine_pred_ty(expr, binder, scope)?;
+            match (op.as_str(), &t) {
+                ("-", Type::Int) => Ok(Type::Int),
+                ("!", Type::Bool) => Ok(Type::Bool),
+                _ => Err(TypeError::at(
+                    *span,
+                    format!("[GAP2-REFINE-TC] unary {op} on {} in refinement predicate", t.to_str()),
+                )),
+            }
+        }
+        Expr::BinOp { op, left, right, span } => {
+            let lt = check_refine_pred_ty(left, binder, scope)?;
+            let rt = check_refine_pred_ty(right, binder, scope)?;
+            match op.as_str() {
+                "&&" | "||" => {
+                    if matches!(lt, Type::Bool) && matches!(rt, Type::Bool) {
+                        Ok(Type::Bool)
+                    } else {
+                        Err(TypeError::at(*span, "[GAP2-REFINE-TC] && / || need Bool operands in refinement predicate"))
+                    }
+                }
+                "+" | "-" | "*" | "/" | "%" => {
+                    if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
+                        Ok(Type::Int)
+                    } else {
+                        Err(TypeError::at(*span, "[GAP2-REFINE-TC] arithmetic needs Int operands in refinement predicate"))
+                    }
+                }
+                "==" | "!=" | "<" | "<=" | ">" | ">=" => {
+                    if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
+                        Ok(Type::Bool)
+                    } else {
+                        Err(TypeError::at(*span, "[GAP2-REFINE-TC] comparisons need Int operands in refinement predicate"))
+                    }
+                }
+                _ => Err(TypeError::at(
+                    *span,
+                    format!("[GAP2-REFINE-TC] operator {op} not allowed in refinement predicate"),
+                )),
+            }
+        }
+        Expr::Call { callee, args, span } => {
+            let is_len = matches!(callee.as_ref(), Expr::Name { name, .. } if name == "len");
+            if !is_len {
+                return Err(TypeError::at(
+                    *span,
+                    "[GAP2-REFINE-TC] only the len(...) measure may be called in a refinement predicate",
+                ));
+            }
+            if args.len() != 1 {
+                return Err(TypeError::at(*span, "[GAP2-REFINE-TC] len(...) measure takes exactly 1 argument"));
+            }
+            let at = check_refine_pred_ty(&args[0], binder, scope)?;
+            if matches!(at, Type::List { .. }) {
+                Ok(Type::Int)
+            } else {
+                Err(TypeError::at(
+                    *span,
+                    format!("[GAP2-REFINE-TC] len(...) measure expects a List, got {}", at.to_str()),
+                ))
+            }
+        }
+        other => Err(TypeError::at(
+            other.span(),
+            "[GAP2-REFINE-TC] expression form not allowed in a refinement predicate \
+             (fragment: binder/params, Int/Bool literals, - ! arithmetic, Int comparisons, && ||, len(List))",
+        )),
+    }
+}
+
+/// [GAP2-REFINE-TC] Walk a type and check every refinement predicate found in
+/// it (including nested positions like `List<{k: Int | ...}>` and fn types).
+/// The pred must check to Bool under `scope` with its binder overlaid.
+fn check_type_refines(ty: &Type, scope: &HashMap<String, Type>) -> Result<(), TypeError> {
+    match ty {
+        Type::Refine { name, pred } => {
+            if let Some(p) = pred {
+                let t = check_refine_pred_ty(p, name, scope)?;
+                if !matches!(t, Type::Bool) {
+                    return Err(TypeError::at(
+                        p.span(),
+                        format!("[GAP2-REFINE-TC] refinement predicate of {{{name}: Int | ...}} must be Bool, got {}", t.to_str()),
+                    ));
+                }
+            }
+            Ok(())
+        }
+        Type::List { elem } => check_type_refines(elem, scope),
+        Type::Option { inner } => check_type_refines(inner, scope),
+        Type::Result { ok, err } => {
+            check_type_refines(ok, scope)?;
+            check_type_refines(err, scope)
+        }
+        Type::Fn { params, ret } => {
+            for p in params {
+                check_type_refines(p, scope)?;
+            }
+            check_type_refines(ret, scope)
+        }
+        _ => Ok(()),
+    }
+}
+
 fn infer_lambda(
     params: &[(String, Option<Type>)],
     ret: Option<&Type>,
@@ -860,6 +1002,14 @@ fn infer_lambda(
         };
         pts.push(t.clone());
         e.insert(name.clone(), erase_refine(t));
+        // [GAP2-REFINE-TC] lambda param refines are runtime-inert (call_closure
+        // never evaluates preds) but still fragment-checked; scope = lambda
+        // params so far + captured bindings.
+        check_type_refines(t, &e)?;
+    }
+    if let Some(r) = ret {
+        // [GAP2-REFINE-TC] lambda return refine, same inert-but-checked rule.
+        check_type_refines(r, &e)?;
     }
     let body_ty = check_block(
         body,
@@ -1527,6 +1677,171 @@ fn main(console: Console) -> Unit uses {console} {
             err.0.contains("[P2-REFINE2]"),
             "expected [P2-REFINE2] in {err}"
         );
+    }
+
+    #[test]
+    fn gap2_rejects_len_over_int_binder() {
+        // [GAP2-REFINE-TC] this shape used to typecheck and trap at runtime
+        // ("len(...) measure expects a List"); now rejected at define time.
+        let src = r#"
+fn f(i: {k: Int | k < len(k)}) -> Int {
+    i
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(f(1).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected GAP2 reject");
+        assert!(err.0.contains("[GAP2-REFINE-TC]"), "{err}");
+        assert!(err.0.contains("expects a List"), "{err}");
+    }
+
+    #[test]
+    fn gap2_rejects_unknown_name_in_pred() {
+        let src = r#"
+fn f(i: {k: Int | k < zz}) -> Int {
+    i
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(f(1).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected GAP2 reject");
+        assert!(err.0.contains("[GAP2-REFINE-TC]"), "{err}");
+        assert!(err.0.contains("unknown name"), "{err}");
+    }
+
+    #[test]
+    fn gap2_rejects_forward_param_reference() {
+        // Prefix scoping matches the interpreter's binding order: param i's
+        // pred may not reference a later param (runtime would trap unbound).
+        let src = r#"
+fn h(i: {k: Int | k < j}, j: Int) -> Int {
+    i
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(h(1, 2).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected GAP2 forward-ref reject");
+        assert!(err.0.contains("[GAP2-REFINE-TC]"), "{err}");
+    }
+
+    #[test]
+    fn gap2_rejects_non_bool_pred() {
+        let src = r#"
+fn f(i: {k: Int | k + 1}) -> Int {
+    i
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(f(1).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected GAP2 non-Bool reject");
+        assert!(err.0.contains("must be Bool"), "{err}");
+    }
+
+    #[test]
+    fn gap2_rejects_disallowed_form_in_pred() {
+        // `if` is outside the spec pred fragment even when runtime-evaluable.
+        let src = r#"
+fn f(i: {k: Int | if true { true } else { false }}) -> Int {
+    i
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(f(1).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected GAP2 form reject");
+        assert!(err.0.contains("not allowed in a refinement predicate"), "{err}");
+    }
+
+    #[test]
+    fn gap2_rejects_user_fn_call_in_pred() {
+        // Preds are pure spec-fragment expressions: only the len(...) measure
+        // may be called (runtime used to happily evaluate helper()).
+        let src = r#"
+fn helper(x: Int) -> Int {
+    x
+}
+fn f(i: {k: Int | helper(k) > 0}) -> Int {
+    i
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(f(1).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected GAP2 user-call reject");
+        assert!(err.0.contains("only the len(...) measure"), "{err}");
+    }
+
+    #[test]
+    fn gap2_checks_lambda_refine_params() {
+        // Lambda param refines are runtime-inert but fragment-checked: valid
+        // pred accepted, malformed pred rejected.
+        let ok = r#"
+fn main(console: Console) -> Unit uses {console} {
+    let id = fn (x: {k: Int | k >= 0}) -> Int { x };
+    console.print(id(1).show());
+}
+"#;
+        let prog = parse(ok).expect("parse");
+        check_program(&prog).expect("valid lambda refine pred must typecheck");
+
+        let bad = r#"
+fn main(console: Console) -> Unit uses {console} {
+    let id = fn (x: {k: Int | k < len(k)}) -> Int { x };
+    console.print(id(1).show());
+}
+"#;
+        let prog = parse(bad).expect("parse");
+        let err = check_program(&prog).expect_err("expected GAP2 lambda pred reject");
+        assert!(err.0.contains("[GAP2-REFINE-TC]"), "{err}");
+    }
+
+    #[test]
+    fn gap2_checks_let_annotation_refines() {
+        // Let-annotation refines are runtime-inert but fragment-checked,
+        // including nested positions like List<{k: Int | ...}>.
+        let ok = r#"
+fn main(console: Console) -> Unit uses {console} {
+    let x: {k: Int | k >= 0} = 5;
+    console.print(x.show());
+}
+"#;
+        let prog = parse(ok).expect("parse");
+        check_program(&prog).expect("valid let refine pred must typecheck");
+
+        let bad = r#"
+fn main(console: Console) -> Unit uses {console} {
+    let xs: List<{k: Int | k < len(k)}> = [1];
+    console.print("n");
+}
+"#;
+        let prog = parse(bad).expect("parse");
+        let err = check_program(&prog).expect_err("expected GAP2 nested let pred reject");
+        assert!(err.0.contains("[GAP2-REFINE-TC]"), "{err}");
+    }
+
+    #[test]
+    fn gap2_accepts_full_valid_fragment() {
+        // Arithmetic + parens + logic + len over a List param, backward refs.
+        let src = r#"
+fn f(lo: Int, hi: Int, xs: List<Int>, i: {k: Int | k * 2 <= hi && (k >= lo || k == 0) && k < len(xs)}) -> Int {
+    i
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(f(0, 10, [1, 2, 3], 1).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("full valid fragment must typecheck");
     }
 
     #[test]
