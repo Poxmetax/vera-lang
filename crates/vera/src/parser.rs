@@ -264,6 +264,26 @@ impl Parser {
                 self.advance();
                 Ok(Type::Console)
             }
+            "fn" => {
+                // fn (T, U) -> R
+                self.advance();
+                self.expect("(")?;
+                let mut params = Vec::new();
+                if !self.at(&[")"]) {
+                    params.push(self.parse_type()?);
+                    while self.at(&[","]) {
+                        self.advance();
+                        params.push(self.parse_type()?);
+                    }
+                }
+                self.expect(")")?;
+                self.expect("->")?;
+                let ret = self.parse_type()?;
+                Ok(Type::Fn {
+                    params,
+                    ret: Box::new(ret),
+                })
+            }
             "List" => {
                 self.advance();
                 self.expect("<")?;
@@ -378,7 +398,48 @@ impl Parser {
         if self.at(&["if"]) {
             return self.parse_if();
         }
+        // Lambda: `fn (` … — not a top-level fn_decl (those start at program level).
+        if self.at(&["fn"]) {
+            return self.parse_lambda();
+        }
         self.parse_or()
+    }
+
+    fn parse_lambda(&mut self) -> Result<Expr, ParseError> {
+        let start = self.expect("fn")?.span;
+        self.expect("(")?;
+        let mut params = Vec::new();
+        if !self.at(&[")"]) {
+            loop {
+                let name = self.advance().text;
+                let ty = if self.at(&[":"]) {
+                    self.advance();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                params.push((name, ty));
+                if self.at(&[","]) {
+                    self.advance();
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect(")")?;
+        let ret = if self.at(&["->"]) {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+        let body = self.parse_block()?;
+        Ok(Expr::Lambda {
+            params,
+            ret,
+            body,
+            span: start,
+        })
     }
 
     fn parse_match(&mut self) -> Result<Expr, ParseError> {
@@ -727,6 +788,12 @@ impl Parser {
                     field,
                     span,
                 };
+            } else if self.at(&["?"]) {
+                let span = self.advance().span;
+                expr = Expr::Propagate {
+                    expr: Box::new(expr),
+                    span,
+                };
             } else {
                 break;
             }
@@ -786,6 +853,33 @@ impl Parser {
         }
         if t.text == "{" {
             return Ok(Expr::Block(self.parse_block()?));
+        }
+        if t.text == "[" {
+            self.advance();
+            let mut elems = Vec::new();
+            if !self.at(&["]"]) {
+                elems.push(self.parse_expr()?);
+                while self.at(&[","]) {
+                    self.advance();
+                    if self.at(&["]"]) {
+                        break;
+                    }
+                    elems.push(self.parse_expr()?);
+                }
+            }
+            self.expect("]")?;
+            return Ok(Expr::ListLit {
+                elems,
+                span: t.span,
+            });
+        }
+        // Typed hole: `?body` lexed as a single "?body" token.
+        if t.text.starts_with('?') && t.text.len() > 1 {
+            self.advance();
+            return Ok(Expr::Hole {
+                name: t.text[1..].to_string(),
+                span: t.span,
+            });
         }
         // Prelude ctors as TypeIdent or bare None
         if t.kind == TokKind::TypeIdent || is_prelude_ctor(&t.text) {

@@ -1,0 +1,15 @@
+// VERA Phase 1 — lambdas + List map/filter/fold
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let doubled: List<Int> = xs.map(fn (x) { x * 2 });
+    let evens: List<Int> = xs.filter(fn (x) { x % 2 == 0 });
+    let sum: Int = xs.fold(0, fn (acc, x) { acc + x });
+    console.print(doubled.len().show());
+    console.print(evens.len().show());
+    console.print(sum.show());
+    let add1: fn(Int) -> Int = fn (n: Int) -> Int { n + 1 };
+    console.print(add1(41).show());
+}

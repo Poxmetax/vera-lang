@@ -28,6 +28,15 @@ pub enum Value {
         variant: String,
         fields: Vec<Value>,
     },
+    List(Vec<Value>),
+    /// Captured lambda / first-class function.
+    Closure {
+        params: Vec<String>,
+        body: Block,
+        captured: HashMap<String, Value>,
+    },
+    /// Internal: `?` propagation bubbling `None` / `Err` out of the current call.
+    EarlyReturn(Box<Value>),
 }
 
 #[derive(Debug, Default)]
@@ -113,7 +122,15 @@ impl<'a> Interpreter<'a> {
         }
         let mut env = Env::new();
         for (p, a) in fn_decl.params.iter().zip(args.into_iter()) {
-            env.insert(p.name.clone(), a);
+            env.insert(p.name.clone(), a.clone());
+            if let Type::Refine {
+                name,
+                pred: Some(pred),
+            } = &p.ty
+            {
+                env.insert(name.clone(), a);
+                self.check_refine_pred(name, pred, &env)?;
+            }
         }
         for req in &fn_decl.requires {
             match self.eval_expr(req, &env)? {
@@ -125,6 +142,19 @@ impl<'a> Interpreter<'a> {
             }
         }
         let result = self.eval_block(&fn_decl.body, &mut env)?;
+        let result = match result {
+            Value::EarlyReturn(v) => *v,
+            other => other,
+        };
+        if let Type::Refine {
+            name,
+            pred: Some(pred),
+        } = &fn_decl.ret
+        {
+            env.insert(name.clone(), result.clone());
+            env.insert("result".into(), result.clone());
+            self.check_refine_pred(name, pred, &env)?;
+        }
         env.insert("result".into(), result.clone());
         for ens in &fn_decl.ensures {
             match self.eval_expr(ens, &env)? {
@@ -138,15 +168,51 @@ impl<'a> Interpreter<'a> {
         Ok(result)
     }
 
+    fn check_refine_pred(&mut self, name: &str, pred: &Expr, env: &Env) -> Result<(), Trap> {
+        match self.eval_expr(pred, env)? {
+            Value::Bool(true) => Ok(()),
+            Value::Bool(false) => Err(Trap(format!("refinement {{{name}: Int | …}} violated"))),
+            _ => Err(Trap(format!("refinement {{{name}}} predicate not Bool"))),
+        }
+    }
+
+    fn call_closure(
+        &mut self,
+        params: &[String],
+        body: &Block,
+        captured: &HashMap<String, Value>,
+        args: Vec<Value>,
+    ) -> Result<Value, Trap> {
+        if args.len() != params.len() {
+            return Err(Trap("closure arity mismatch".into()));
+        }
+        let mut env = Env {
+            values: captured.clone(),
+        };
+        for (p, a) in params.iter().zip(args.into_iter()) {
+            env.insert(p.clone(), a);
+        }
+        match self.eval_block(body, &mut env)? {
+            Value::EarlyReturn(v) => Ok(*v),
+            other => Ok(other),
+        }
+    }
+
     fn eval_block(&mut self, block: &Block, env: &mut Env) -> Result<Value, Trap> {
         for stmt in &block.stmts {
             match stmt {
                 Stmt::Let { name, value, .. } => {
                     let v = self.eval_expr(value, env)?;
+                    if matches!(v, Value::EarlyReturn(_)) {
+                        return Ok(v);
+                    }
                     env.insert(name.clone(), v);
                 }
                 Stmt::Expr { expr, .. } => {
-                    self.eval_expr(expr, env)?;
+                    let v = self.eval_expr(expr, env)?;
+                    if matches!(v, Value::EarlyReturn(_)) {
+                        return Ok(v);
+                    }
                 }
             }
         }
@@ -194,6 +260,18 @@ impl<'a> Interpreter<'a> {
                     fields: map,
                 })
             }
+            Expr::ListLit { elems, .. } => {
+                let mut out = Vec::new();
+                for e in elems {
+                    out.push(self.eval_expr(e, env)?);
+                }
+                Ok(Value::List(out))
+            }
+            Expr::Lambda { params, body, .. } => Ok(Value::Closure {
+                params: params.iter().map(|(n, _)| n.clone()).collect(),
+                body: body.clone(),
+                captured: env.values.clone(),
+            }),
             Expr::UnaryOp { op, expr, .. } => {
                 let v = self.eval_expr(expr, env)?;
                 match (op.as_str(), v) {
@@ -233,6 +311,11 @@ impl<'a> Interpreter<'a> {
                 let r = self.eval_expr(right, env)?;
                 match (op.as_str(), l, r) {
                     ("++", Value::Str(a), Value::Str(b)) => Ok(Value::Str(a + &b)),
+                    ("++", Value::List(a), Value::List(b)) => {
+                        let mut out = a;
+                        out.extend(b);
+                        Ok(Value::List(out))
+                    }
                     ("+", Value::Int(a), Value::Int(b)) => Ok(Value::Int(checked_add(a, b)?)),
                     ("-", Value::Int(a), Value::Int(b)) => Ok(Value::Int(checked_sub(a, b)?)),
                     ("*", Value::Int(a), Value::Int(b)) => Ok(Value::Int(checked_mul(a, b)?)),
@@ -257,6 +340,9 @@ impl<'a> Interpreter<'a> {
                     Value::Console => Err(Trap(
                         "bare Console field — call .print(...)".into(),
                     )),
+                    Value::List(_) | Value::Int(_) => Err(Trap(format!(
+                        "bare method {field} — call .{field}(...)"
+                    ))),
                     _ => Err(Trap("field access on non-struct".into())),
                 }
             }
@@ -270,6 +356,15 @@ impl<'a> Interpreter<'a> {
                         };
                         self.console.print_line(&s);
                         return Ok(Value::Unit);
+                    }
+                    if field == "show" {
+                        return match o {
+                            Value::Int(n) if args.is_empty() => Ok(Value::Str(n.to_string())),
+                            _ => Err(Trap("show() expects Int receiver".into())),
+                        };
+                    }
+                    if let Value::List(items) = o {
+                        return eval_list_method(field, items, args, self, env);
                     }
                 }
                 if let Expr::Name { name, .. } = callee.as_ref() {
@@ -288,7 +383,21 @@ impl<'a> Interpreter<'a> {
                         return self.call_fn(fn_decl, argv);
                     }
                 }
-                Err(Trap("bad call".into()))
+                // First-class call: evaluate callee to a Closure.
+                match self.eval_expr(callee, env)? {
+                    Value::Closure {
+                        params,
+                        body,
+                        captured,
+                    } => {
+                        let mut argv = Vec::new();
+                        for a in args {
+                            argv.push(self.eval_expr(a, env)?);
+                        }
+                        self.call_closure(&params, &body, &captured, argv)
+                    }
+                    _ => Err(Trap("bad call".into())),
+                }
             }
             Expr::IfExpr {
                 cond,
@@ -314,6 +423,9 @@ impl<'a> Interpreter<'a> {
                 scrutinee, arms, ..
             } => {
                 let v = self.eval_expr(scrutinee, env)?;
+                if matches!(v, Value::EarlyReturn(_)) {
+                    return Ok(v);
+                }
                 for arm in arms {
                     if let Some(binds) = match_pattern(&arm.pattern, &v)? {
                         let mut e = Env {
@@ -329,6 +441,15 @@ impl<'a> Interpreter<'a> {
                     "match: no arm matched (non-exhaustive at runtime)".into(),
                 ))
             }
+            Expr::Hole { name, .. } => Err(Trap(format!("unfilled hole ?{name}"))),
+            Expr::Propagate { expr, .. } => match self.eval_expr(expr, env)? {
+                Value::OptionSome(v) => Ok(*v),
+                Value::OptionNone => Ok(Value::EarlyReturn(Box::new(Value::OptionNone))),
+                Value::ResultOk(v) => Ok(*v),
+                Value::ResultErr(e) => Ok(Value::EarlyReturn(Box::new(Value::ResultErr(e)))),
+                Value::EarlyReturn(v) => Ok(Value::EarlyReturn(v)),
+                _ => Err(Trap("`?` on non-Option/Result".into())),
+            },
             Expr::Block(b) => {
                 let mut e = Env {
                     values: env.values.clone(),
@@ -450,6 +571,144 @@ fn match_pattern(pat: &Pattern, value: &Value) -> Result<Option<Vec<(String, Val
     }
 }
 
+fn eval_list_method(
+    field: &str,
+    items: Vec<Value>,
+    args: &[Expr],
+    interp: &mut Interpreter<'_>,
+    env: &Env,
+) -> Result<Value, Trap> {
+    match field {
+        "len" => {
+            if !args.is_empty() {
+                return Err(Trap("len takes 0 args".into()));
+            }
+            Ok(Value::Int(items.len() as i64))
+        }
+        "get" => {
+            if args.len() != 1 {
+                return Err(Trap("get takes 1 arg".into()));
+            }
+            let idx = match interp.eval_expr(&args[0], env)? {
+                Value::Int(i) => i,
+                _ => return Err(Trap("get index must be Int".into())),
+            };
+            if idx < 0 {
+                return Ok(Value::OptionNone);
+            }
+            let u = idx as usize;
+            match items.get(u) {
+                Some(v) => Ok(Value::OptionSome(Box::new(v.clone()))),
+                None => Ok(Value::OptionNone),
+            }
+        }
+        "head" => {
+            if !args.is_empty() {
+                return Err(Trap("head takes 0 args".into()));
+            }
+            match items.first() {
+                Some(v) => Ok(Value::OptionSome(Box::new(v.clone()))),
+                None => Ok(Value::OptionNone),
+            }
+        }
+        "tail" => {
+            if !args.is_empty() {
+                return Err(Trap("tail takes 0 args".into()));
+            }
+            if items.is_empty() {
+                Ok(Value::OptionNone)
+            } else {
+                Ok(Value::OptionSome(Box::new(Value::List(
+                    items[1..].to_vec(),
+                ))))
+            }
+        }
+        "append" => {
+            if args.len() != 1 {
+                return Err(Trap("append takes 1 arg".into()));
+            }
+            let mut out = items;
+            out.push(interp.eval_expr(&args[0], env)?);
+            Ok(Value::List(out))
+        }
+        "map" => {
+            if args.len() != 1 {
+                return Err(Trap("map takes 1 function".into()));
+            }
+            let f = interp.eval_expr(&args[0], env)?;
+            let mut out = Vec::new();
+            for item in items {
+                out.push(apply_unary(interp, &f, item)?);
+            }
+            Ok(Value::List(out))
+        }
+        "filter" => {
+            if args.len() != 1 {
+                return Err(Trap("filter takes 1 predicate".into()));
+            }
+            let f = interp.eval_expr(&args[0], env)?;
+            let mut out = Vec::new();
+            for item in items {
+                match apply_unary(interp, &f, item.clone())? {
+                    Value::Bool(true) => out.push(item),
+                    Value::Bool(false) => {}
+                    _ => return Err(Trap("filter predicate must return Bool".into())),
+                }
+            }
+            Ok(Value::List(out))
+        }
+        "fold" => {
+            if args.len() != 2 {
+                return Err(Trap("fold takes init and function".into()));
+            }
+            let mut acc = interp.eval_expr(&args[0], env)?;
+            let f = interp.eval_expr(&args[1], env)?;
+            for item in items {
+                acc = apply_binary(interp, &f, acc, item)?;
+            }
+            Ok(acc)
+        }
+        _ => Err(Trap(format!("unknown list method {field}"))),
+    }
+}
+
+fn apply_unary(interp: &mut Interpreter<'_>, f: &Value, arg: Value) -> Result<Value, Trap> {
+    match f {
+        Value::Closure {
+            params,
+            body,
+            captured,
+        } => {
+            if params.len() != 1 {
+                return Err(Trap("unary apply expects 1-param closure".into()));
+            }
+            interp.call_closure(params, body, captured, vec![arg])
+        }
+        _ => Err(Trap("apply expected closure".into())),
+    }
+}
+
+fn apply_binary(
+    interp: &mut Interpreter<'_>,
+    f: &Value,
+    a: Value,
+    b: Value,
+) -> Result<Value, Trap> {
+    match f {
+        Value::Closure {
+            params,
+            body,
+            captured,
+        } => {
+            if params.len() != 2 {
+                return Err(Trap("binary apply expects 2-param closure".into()));
+            }
+            interp.call_closure(params, body, captured, vec![a, b])
+        }
+        _ => Err(Trap("apply expected closure".into())),
+    }
+}
+
 fn values_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int(x), Value::Int(y)) => x == y,
@@ -492,6 +751,11 @@ fn values_eq(a: &Value, b: &Value) -> bool {
                 && f1.len() == f2.len()
                 && f1.iter().zip(f2.iter()).all(|(a, b)| values_eq(a, b))
         }
+        (Value::List(a), Value::List(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_eq(x, y))
+        }
+        // Closures: identity only (no structural eq).
+        (Value::Closure { .. }, Value::Closure { .. }) => false,
         _ => false,
     }
 }

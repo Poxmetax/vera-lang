@@ -53,6 +53,11 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
 
     while i < n {
         let ch = chars[i];
+        // UTF-8 BOM (common on Windows editors / PowerShell Out-File)
+        if ch == '\u{FEFF}' {
+            i += 1;
+            continue;
+        }
         if ch == ' ' || ch == '\t' || ch == '\r' {
             i += 1;
             col += 1;
@@ -179,9 +184,30 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
             continue;
         }
 
-        if "+-*/%<>=!".contains(ch) {
+        if "+-*/%<>=!?".contains(ch) {
             i += 1;
             col += 1;
+            // `?ident` with no space → hole token (SPEC §3.2).
+            if ch == '?' {
+                if let Some(next) = peek(i, 0) {
+                    if next.is_ascii_alphabetic() || next == '_' {
+                        let mut name = String::new();
+                        while i < chars.len()
+                            && (chars[i].is_ascii_alphanumeric() || chars[i] == '_')
+                        {
+                            name.push(chars[i]);
+                            i += 1;
+                            col += 1;
+                        }
+                        out.push(Token {
+                            kind: TokKind::Op,
+                            text: format!("?{name}"),
+                            span: start,
+                        });
+                        continue;
+                    }
+                }
+            }
             out.push(Token {
                 kind: TokKind::Op,
                 text: ch.to_string(),
@@ -190,7 +216,7 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
             continue;
         }
 
-        if "(){},;:|.".contains(ch) {
+        if "(){},;:|.[]".contains(ch) {
             i += 1;
             col += 1;
             out.push(Token {

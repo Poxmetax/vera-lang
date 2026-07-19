@@ -194,6 +194,37 @@ fn infer_expr(expr: &Expr, env: &Env<'_>) -> Result<Type, TypeError> {
         Expr::LitBool { .. } => Ok(Type::Bool),
         Expr::LitStr { .. } => Ok(Type::Str),
         Expr::LitUnit { .. } => Ok(Type::Unit),
+        Expr::ListLit { elems, span } => {
+            if elems.is_empty() {
+                // Empty list defaults to List<Int> when unconstrained (Phase 1).
+                return Ok(Type::List {
+                    elem: Box::new(Type::Int),
+                });
+            }
+            let first = infer_expr(&elems[0], env)?;
+            for e in &elems[1..] {
+                let t = infer_expr(e, env)?;
+                if !types_equal(&first, &t) {
+                    return Err(TypeError::at(
+                        *span,
+                        format!(
+                            "list elements differ: {} vs {}",
+                            first.to_str(),
+                            t.to_str()
+                        ),
+                    ));
+                }
+            }
+            Ok(Type::List {
+                elem: Box::new(first),
+            })
+        }
+        Expr::Lambda {
+            params,
+            ret,
+            body,
+            span,
+        } => infer_lambda(params, ret.as_ref(), body, *span, env),
         Expr::Name { name, span } => {
             if let Some(t) = env.vars.get(name) {
                 return Ok(t.clone());
@@ -284,13 +315,15 @@ fn infer_expr(expr: &Expr, env: &Env<'_>) -> Result<Type, TypeError> {
             let lt = infer_expr(left, env)?;
             let rt = infer_expr(right, env)?;
             match op.as_str() {
-                "++" => {
-                    if matches!(lt, Type::Str) && matches!(rt, Type::Str) {
-                        Ok(Type::Str)
-                    } else {
-                        Err(TypeError::at(*span, "++ expects Str ++ Str"))
+                "++" => match (&lt, &rt) {
+                    (Type::Str, Type::Str) => Ok(Type::Str),
+                    (Type::List { elem: a }, Type::List { elem: b }) if types_equal(a, b) => {
+                        Ok(Type::List {
+                            elem: a.clone(),
+                        })
                     }
-                }
+                    _ => Err(TypeError::at(*span, "++ expects Str++Str or List++List")),
+                },
                 "+" | "-" | "*" | "/" | "%" => {
                     if matches!(lt, Type::Int | Type::Refine { .. })
                         && matches!(rt, Type::Int | Type::Refine { .. })
@@ -318,6 +351,13 @@ fn infer_expr(expr: &Expr, env: &Env<'_>) -> Result<Type, TypeError> {
             let obj_t = infer_expr(obj, env)?;
             if matches!(obj_t, Type::Console) && field == "print" {
                 return Ok(Type::Console);
+            }
+            // Method placeholders typed at Call site: len/get/head/tail/append/show
+            if matches!(
+                field.as_str(),
+        "len" | "get" | "head" | "tail" | "append" | "show" | "map" | "filter" | "fold"
+            ) {
+                return Ok(obj_t);
             }
             if let Type::Named { name } = &obj_t {
                 if let Some(sd) = env.adt.structs.get(name) {
@@ -352,6 +392,113 @@ fn infer_expr(expr: &Expr, env: &Env<'_>) -> Result<Type, TypeError> {
                     }
                     return Ok(Type::Unit);
                 }
+                if field == "show" {
+                    if args.is_empty() && matches!(obj_t, Type::Int | Type::Refine { .. }) {
+                        return Ok(Type::Str);
+                    }
+                    return Err(TypeError::at(*span, "show() only on Int with 0 args"));
+                }
+                if let Type::List { elem } = &obj_t {
+                    match field.as_str() {
+                        "len" => {
+                            if !args.is_empty() {
+                                return Err(TypeError::at(*span, "len takes 0 args"));
+                            }
+                            return Ok(Type::Int);
+                        }
+                        "get" => {
+                            if args.len() != 1 {
+                                return Err(TypeError::at(*span, "get takes 1 Int index"));
+                            }
+                            let at = infer_expr(&args[0], env)?;
+                            if !matches!(at, Type::Int | Type::Refine { .. }) {
+                                return Err(TypeError::at(*span, "get index must be Int"));
+                            }
+                            return Ok(Type::Option {
+                                inner: elem.clone(),
+                            });
+                        }
+                        "head" => {
+                            if !args.is_empty() {
+                                return Err(TypeError::at(*span, "head takes 0 args"));
+                            }
+                            return Ok(Type::Option {
+                                inner: elem.clone(),
+                            });
+                        }
+                        "tail" => {
+                            if !args.is_empty() {
+                                return Err(TypeError::at(*span, "tail takes 0 args"));
+                            }
+                            return Ok(Type::Option {
+                                inner: Box::new(Type::List {
+                                    elem: elem.clone(),
+                                }),
+                            });
+                        }
+                        "append" => {
+                            if args.len() != 1 {
+                                return Err(TypeError::at(*span, "append takes 1 element"));
+                            }
+                            let at = infer_expr(&args[0], env)?;
+                            if !types_equal(&at, elem) {
+                                return Err(TypeError::at(
+                                    *span,
+                                    format!(
+                                        "append elem {} != {}",
+                                        at.to_str(),
+                                        elem.to_str()
+                                    ),
+                                ));
+                            }
+                            return Ok(Type::List {
+                                elem: elem.clone(),
+                            });
+                        }
+                        "map" => {
+                            if args.len() != 1 {
+                                return Err(TypeError::at(*span, "map takes 1 function"));
+                            }
+                            let out_elem =
+                                check_hof_unary(&args[0], elem, None, *span, env)?;
+                            return Ok(Type::List {
+                                elem: Box::new(out_elem),
+                            });
+                        }
+                        "filter" => {
+                            if args.len() != 1 {
+                                return Err(TypeError::at(*span, "filter takes 1 predicate"));
+                            }
+                            let pred_ret =
+                                check_hof_unary(&args[0], elem, Some(&Type::Bool), *span, env)?;
+                            if !matches!(pred_ret, Type::Bool) {
+                                return Err(TypeError::at(*span, "filter predicate must return Bool"));
+                            }
+                            return Ok(Type::List {
+                                elem: elem.clone(),
+                            });
+                        }
+                        "fold" => {
+                            if args.len() != 2 {
+                                return Err(TypeError::at(
+                                    *span,
+                                    "fold takes init and fn (acc, elem) -> acc",
+                                ));
+                            }
+                            let init_ty = infer_expr(&args[0], env)?;
+                            check_hof_binary(
+                                &args[1],
+                                &init_ty,
+                                elem,
+                                &init_ty,
+                                *span,
+                                env,
+                            )?;
+                            return Ok(init_ty);
+                        }
+                        _ => {}
+                    }
+                }
             }
             if let Expr::Name { name, .. } = callee.as_ref() {
                 if let Some(fn_decl) = env.fns.get(name) {
@@ -375,11 +522,31 @@ fn infer_expr(expr: &Expr, env: &Env<'_>) -> Result<Type, TypeError> {
                             ));
                         }
                     }
-                    return Ok(fn_decl.ret.clone());
+                    return Ok(erase_refine(&fn_decl.ret));
                 }
                 if is_prelude_ctor(name) {
                     return infer_ctor(None, name, args, *span, env);
                 }
+            }
+            // Call a first-class function value (closure / lambda).
+            let ft = infer_expr(callee, env)?;
+            if let Type::Fn { params, ret } = ft {
+                if args.len() != params.len() {
+                    return Err(TypeError::at(
+                        *span,
+                        format!("function expects {} args, got {}", params.len(), args.len()),
+                    ));
+                }
+                for (a, p) in args.iter().zip(params.iter()) {
+                    let at = infer_expr(a, env)?;
+                    if !types_equal(&at, p) {
+                        return Err(TypeError::at(
+                            *span,
+                            format!("arg type {} != {}", at.to_str(), p.to_str()),
+                        ));
+                    }
+                }
+                return Ok(*ret);
             }
             Err(TypeError::at(*span, "unsupported call"))
         }
@@ -408,7 +575,225 @@ fn infer_expr(expr: &Expr, env: &Env<'_>) -> Result<Type, TypeError> {
             arms,
             span,
         } => check_match(scrutinee, arms, *span, env),
+        Expr::Hole { name, span } => Err(TypeError::at(
+            *span,
+            format!("unfilled typed hole ?{name} (fill body or run synthesis)"),
+        )),
+        Expr::Propagate { expr, span } => {
+            let t = infer_expr(expr, env)?;
+            match t {
+                Type::Option { inner } => Ok(*inner),
+                Type::Result { ok, .. } => Ok(*ok),
+                other => Err(TypeError::at(
+                    *span,
+                    format!("`?` propagation requires Option or Result, got {}", other.to_str()),
+                )),
+            }
+        }
         Expr::Block(b) => check_block(b, env),
+    }
+}
+
+fn erase_refine(t: &Type) -> Type {
+    match t {
+        Type::Refine { .. } => Type::Int,
+        other => other.clone(),
+    }
+}
+
+fn infer_lambda(
+    params: &[(String, Option<Type>)],
+    ret: Option<&Type>,
+    body: &Block,
+    span: Span,
+    env: &Env<'_>,
+) -> Result<Type, TypeError> {
+    let mut e = env.vars.clone();
+    let mut pts = Vec::new();
+    for (name, ty) in params {
+        let Some(t) = ty else {
+            return Err(TypeError::at(
+                span,
+                format!(
+                    "lambda param {name} needs a type annotation (or pass via map/filter/fold)"
+                ),
+            ));
+        };
+        pts.push(t.clone());
+        e.insert(name.clone(), erase_refine(t));
+    }
+    let body_ty = check_block(
+        body,
+        &Env {
+            vars: e,
+            fns: env.fns,
+            adt: env.adt,
+        },
+    )?;
+    if let Some(r) = ret {
+        if !types_equal(&body_ty, r) {
+            return Err(TypeError::at(
+                span,
+                format!(
+                    "lambda body {} != declared {}",
+                    body_ty.to_str(),
+                    r.to_str()
+                ),
+            ));
+        }
+        Ok(Type::Fn {
+            params: pts,
+            ret: Box::new(r.clone()),
+        })
+    } else {
+        Ok(Type::Fn {
+            params: pts,
+            ret: Box::new(body_ty),
+        })
+    }
+}
+
+/// Unary HOF: `fn (x) { ... }` or `fn (x: T) -> R { ... }` against element type `elem`.
+fn check_hof_unary(
+    f: &Expr,
+    elem: &Type,
+    expected_ret: Option<&Type>,
+    span: Span,
+    env: &Env<'_>,
+) -> Result<Type, TypeError> {
+    match f {
+        Expr::Lambda {
+            params,
+            ret,
+            body,
+            span: lsp,
+        } => {
+            if params.len() != 1 {
+                return Err(TypeError::at(span, "unary HOF expects 1-param lambda"));
+            }
+            let (pname, pty) = &params[0];
+            if let Some(t) = pty {
+                if !types_equal(t, elem) {
+                    return Err(TypeError::at(
+                        *lsp,
+                        format!("lambda param {} != list elem {}", t.to_str(), elem.to_str()),
+                    ));
+                }
+            }
+            let mut e = env.vars.clone();
+            e.insert(pname.clone(), erase_refine(elem));
+            let body_ty = check_block(
+                body,
+                &Env {
+                    vars: e,
+                    fns: env.fns,
+                    adt: env.adt,
+                },
+            )?;
+            if let Some(r) = ret {
+                if !types_equal(&body_ty, r) {
+                    return Err(TypeError::at(*lsp, "lambda return mismatch"));
+                }
+            }
+            if let Some(er) = expected_ret {
+                if !types_equal(&body_ty, er) {
+                    return Err(TypeError::at(
+                        span,
+                        format!("expected return {}, got {}", er.to_str(), body_ty.to_str()),
+                    ));
+                }
+            }
+            Ok(body_ty)
+        }
+        _ => {
+            let ft = infer_expr(f, env)?;
+            match ft {
+                Type::Fn { params, ret } if params.len() == 1 && types_equal(&params[0], elem) => {
+                    if let Some(er) = expected_ret {
+                        if !types_equal(&ret, er) {
+                            return Err(TypeError::at(span, "function return mismatch"));
+                        }
+                    }
+                    Ok(*ret)
+                }
+                _ => Err(TypeError::at(span, "expected fn (elem) -> _")),
+            }
+        }
+    }
+}
+
+fn check_hof_binary(
+    f: &Expr,
+    acc_ty: &Type,
+    elem: &Type,
+    expected_ret: &Type,
+    span: Span,
+    env: &Env<'_>,
+) -> Result<(), TypeError> {
+    match f {
+        Expr::Lambda {
+            params,
+            ret,
+            body,
+            span: lsp,
+        } => {
+            if params.len() != 2 {
+                return Err(TypeError::at(span, "fold fn expects 2 params (acc, elem)"));
+            }
+            let (a_name, a_ty) = &params[0];
+            let (e_name, e_ty) = &params[1];
+            if let Some(t) = a_ty {
+                if !types_equal(t, acc_ty) {
+                    return Err(TypeError::at(*lsp, "fold acc param type mismatch"));
+                }
+            }
+            if let Some(t) = e_ty {
+                if !types_equal(t, elem) {
+                    return Err(TypeError::at(*lsp, "fold elem param type mismatch"));
+                }
+            }
+            let mut e = env.vars.clone();
+            e.insert(a_name.clone(), erase_refine(acc_ty));
+            e.insert(e_name.clone(), erase_refine(elem));
+            let body_ty = check_block(
+                body,
+                &Env {
+                    vars: e,
+                    fns: env.fns,
+                    adt: env.adt,
+                },
+            )?;
+            if let Some(r) = ret {
+                if !types_equal(&body_ty, r) {
+                    return Err(TypeError::at(*lsp, "fold lambda return mismatch"));
+                }
+            }
+            if !types_equal(&body_ty, expected_ret) {
+                return Err(TypeError::at(
+                    span,
+                    format!(
+                        "fold body {} != acc {}",
+                        body_ty.to_str(),
+                        expected_ret.to_str()
+                    ),
+                ));
+            }
+            Ok(())
+        }
+        _ => {
+            let ft = infer_expr(f, env)?;
+            match ft {
+                Type::Fn { params, ret }
+                    if params.len() == 2
+                        && types_equal(&params[0], acc_ty)
+                        && types_equal(&params[1], elem)
+                        && types_equal(&ret, expected_ret) =>
+                {
+                    Ok(())
+                }
+                _ => Err(TypeError::at(span, "expected fn (acc, elem) -> acc")),
+            }
+        }
     }
 }
 

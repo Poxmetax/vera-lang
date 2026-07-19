@@ -8,20 +8,27 @@ The goal, in one line: **the language an LLM writes with the fewest shipped bugs
 
 - **Phase -1 (thesis pilot): PASS, 2026-07-19.** See [`docs/pilot/REPORT.md`](docs/pilot/REPORT.md).
 - **Phase 0 (research + design): delivered, 2026-07-19.** [`docs/research/RESEARCH_REPORT.md`](docs/research/RESEARCH_REPORT.md), [`docs/spec/SPEC.md`](docs/spec/SPEC.md) v0.1.
-- **SMT spike (pilot R1 partial): PASS.** [`docs/pilot/SMT_SPIKE_REPORT.md`](docs/pilot/SMT_SPIKE_REPORT.md) (Python `z3-solver`; native Z3 CLI also present for Phase 2).
-- **Phase 1 (Rust front-end + interpreter): in progress.** Workspace `crates/vera` — lexer, parser, BLAKE3 store, typecheck, interpreter. Supported MVP slice: Int/Bool/Str/Unit/Console, `Option`/`Result`, user `struct`/`enum`, `match` (exhaustive for Option/Result/enums), `requires`/`ensures` (runtime), content-addressed defs.
+- **SMT spike (pilot R1 partial): PASS.** [`docs/pilot/SMT_SPIKE_REPORT.md`](docs/pilot/SMT_SPIKE_REPORT.md).
+- **Phase 1 (Rust front-end + interpreter): CONF-P1 gate met (plan §9).** Spec §3 MVP language surface + plan acceptance:
+  - `.vera` programs run (9 examples)
+  - content-addressed store round-trip: `parse → hash → render → parse` identity (`--round-trip`, `cargo test`)
+  - typed edit transactions (U16): stale-base reject + typecheck-gated commit (`EditTransaction`)
+  - typed holes `?ident` parse (unfilled = type/runtime error; synthesis later S1)
+  - postfix `?` Option/Result propagation
+  - **Phase 2 (thin VC slice): in progress.** Z3 via SMT-LIB2 subprocess; `vera --prove` discharges Int/bool/`ite` requires·ensures·`{x:Int|pred}` (see [`docs/pilot/PHASE2_VC_SLICE_REPORT.md`](docs/pilot/PHASE2_VC_SLICE_REPORT.md)). Full CONF-P2 / REQ-REFINE-1·2 still open.
 
 ## Quick start
 
 ```powershell
 cd C:\Users\madis\Desktop\TradingBot\vera-lang
 cargo run -p vera -- examples/hello.vera
-cargo run -p vera -- examples/clamp.vera
-cargo run -p vera -- examples/option_result.vera
-cargo run -p vera -- examples/adt.vera
+cargo run -p vera -- examples/propagate.vera
+cargo run -p vera -- --round-trip examples/hello.vera
+cargo test -p vera
+cargo run -p vera -- --prove examples/prove_clamp.vera
 ```
 
-Optional flags: `--hash-only`, `--dump-ast`.
+Optional flags: `--hash-only`, `--dump-ast`, `--prove` (Phase 2 VC discharge).
 
 ### Native Z3 (Phase 2; already unpacked)
 

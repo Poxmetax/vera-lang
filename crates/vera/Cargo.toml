@@ -2,7 +2,7 @@
 name = "vera"
 version = "0.1.0"
 edition = "2021"
-description = "VERA Phase 1 reference front-end + interpreter"
+description = "VERA Phase 1–2 reference front-end + interpreter + Z3 VC slice"
 license = "Apache-2.0"
 
 [[bin]]

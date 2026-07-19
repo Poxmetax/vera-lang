@@ -26,6 +26,11 @@ pub enum Type {
     List { elem: Box<Type> },
     Option { inner: Box<Type> },
     Result { ok: Box<Type>, err: Box<Type> },
+    /// Function type: `fn(Int) -> Int` (lambdas / higher-order params).
+    Fn {
+        params: Vec<Type>,
+        ret: Box<Type>,
+    },
     Refine {
         name: String,
         pred: Option<Box<Expr>>,
@@ -44,6 +49,10 @@ impl Type {
             Type::List { elem } => format!("List<{}>", elem.to_str()),
             Type::Option { inner } => format!("Option<{}>", inner.to_str()),
             Type::Result { ok, err } => format!("Result<{},{}>", ok.to_str(), err.to_str()),
+            Type::Fn { params, ret } => {
+                let ps: Vec<String> = params.iter().map(|p| p.to_str()).collect();
+                format!("fn({}) -> {}", ps.join(", "), ret.to_str())
+            }
             Type::Refine { name, .. } => format!("{{{name}: Int | ...}}"),
         }
     }
@@ -155,6 +164,20 @@ pub enum Expr {
         #[serde(skip)]
         span: Span,
     },
+    /// Lambda: `fn (x: Int) -> Int { x + 1 }` (param/return types optional when inferable).
+    Lambda {
+        params: Vec<(String, Option<Type>)>,
+        ret: Option<Type>,
+        body: Block,
+        #[serde(skip)]
+        span: Span,
+    },
+    /// List literal: `[1, 2, 3]`.
+    ListLit {
+        elems: Vec<Expr>,
+        #[serde(skip)]
+        span: Span,
+    },
     BinOp {
         op: String,
         left: Box<Expr>,
@@ -193,6 +216,18 @@ pub enum Expr {
         #[serde(skip)]
         span: Span,
     },
+    /// Typed hole `?body` (S1 scaffolding; Phase 1: typechecks, does not run).
+    Hole {
+        name: String,
+        #[serde(skip)]
+        span: Span,
+    },
+    /// Postfix `?` — propagate `None`/`Err` to caller (`Result`/`Option`).
+    Propagate {
+        expr: Box<Expr>,
+        #[serde(skip)]
+        span: Span,
+    },
     Block(Block),
 }
 
@@ -206,12 +241,16 @@ impl Expr {
             | Expr::Name { span, .. }
             | Expr::Ctor { span, .. }
             | Expr::StructLit { span, .. }
+            | Expr::ListLit { span, .. }
+            | Expr::Lambda { span, .. }
             | Expr::BinOp { span, .. }
             | Expr::UnaryOp { span, .. }
             | Expr::Call { span, .. }
             | Expr::FieldAccess { span, .. }
             | Expr::IfExpr { span, .. }
-            | Expr::MatchExpr { span, .. } => *span,
+            | Expr::MatchExpr { span, .. }
+            | Expr::Hole { span, .. }
+            | Expr::Propagate { span, .. } => *span,
             Expr::Block(b) => b.span,
         }
     }

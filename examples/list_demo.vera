@@ -1,0 +1,24 @@
+// VERA Phase 1 — List literals and total accessors
+
+fn label_opt(x: Option<Int>) -> Str {
+    match x {
+        Some(n) => n.show(),
+        None => "none",
+    }
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    let xs: List<Int> = [1, 2, 3];
+    let ys: List<Int> = xs ++ [4];
+    let zs: List<Int> = ys.append(5);
+    console.print(zs.len().show());
+    console.print(label_opt(zs.get(0)));
+    console.print(label_opt(zs.get(99)));
+    console.print(label_opt(zs.head()));
+    console.print(match zs.tail() {
+        Some(t) => t.len().show(),
+        None => "empty",
+    });
+}
