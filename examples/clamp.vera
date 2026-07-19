@@ -1,0 +1,28 @@
+// VERA Phase 1 — contracts on clamp (runtime-checked; SMT path is the pilot spike)
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int
+    requires lo <= hi
+    requires x == x
+    ensures result >= lo
+    ensures result <= hi
+{
+    if x < lo {
+        lo
+    } else {
+        if x > hi {
+            hi
+        } else {
+            x
+        }
+    }
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    let a: Int = clamp(5, 0, 10);
+    let b: Int = clamp(-3, 0, 10);
+    let c: Int = clamp(99, 0, 10);
+    console.print("clamp demo");
+    console.print("ok");
+}

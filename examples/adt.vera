@@ -1,0 +1,35 @@
+// VERA Phase 1 — user struct + enum + match
+
+struct Point {
+    x: Int,
+    y: Int,
+}
+
+enum Verdict {
+    Approved,
+    Rejected(Str),
+}
+
+fn point_label(p: Point) -> Str {
+    if p.x == p.y {
+        "squareish"
+    } else {
+        "rect"
+    }
+}
+
+fn verdict_label(v: Verdict) -> Str {
+    match v {
+        Verdict::Approved => "ok",
+        Verdict::Rejected(msg) => msg,
+    }
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    let p: Point = Point(x: 3, y: 3);
+    console.print(point_label(p));
+    console.print(verdict_label(Verdict::Approved));
+    console.print(verdict_label(Verdict::Rejected("nope")));
+}
