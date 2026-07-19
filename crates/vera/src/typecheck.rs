@@ -652,6 +652,9 @@ fn infer_expr(expr: &Expr, env: &Env<'_>) -> Result<Type, TypeError> {
 /// the binder + literals, evaluate it. Some(false) → type error (zero exec).
 /// Unevaluable / non-literal args stay soft (prove / runtime). Definition-time
 /// return-refine body reject: see [P2-REFINE1-DEF] `check_ret_refine_body`.
+/// [P2-REFINE2] REQ-REFINE-2: Kleene && / || lets a decided conjunct reject even
+/// when the other side is an unevaluable `len(xs)` measure — e.g. `nth(xs, -1)`
+/// fails `0 <= k` and is rejected with zero execution (SPEC §4.4).
 fn check_lit_arg_refine(arg: &Expr, param: &Param, span: Span) -> Result<(), TypeError> {
     let Type::Refine {
         name: binder,
@@ -674,15 +677,36 @@ fn check_lit_arg_refine(arg: &Expr, param: &Param, span: Span) -> Result<(), Typ
         _ => return Ok(()),
     };
     if pred_holds_for_lit(pred, binder, value) == Some(false) {
+        // [P2-REFINE2] len-measure preds carry the REQ-REFINE-2 marker so the
+        // diagnostic names the conformance requirement that rejected the call.
+        let marker = if pred_mentions_len(pred) {
+            "[P2-REFINE2]"
+        } else {
+            "[P2-REFINE1]"
+        };
         return Err(TypeError::at(
             span,
             format!(
-                "[P2-REFINE1] arg {} = {value} violates parameter refinement",
+                "{marker} arg {} = {value} violates parameter refinement",
                 param.name
             ),
         ));
     }
     Ok(())
+}
+
+/// [P2-REFINE2] Does a refinement predicate mention the `len(...)` measure?
+/// Diagnostic labeling only — evaluation stays in `pred_holds_for_lit`.
+fn pred_mentions_len(pred: &Expr) -> bool {
+    match pred {
+        Expr::Call { callee, args, .. } => {
+            matches!(callee.as_ref(), Expr::Name { name, .. } if name == "len")
+                || args.iter().any(pred_mentions_len)
+        }
+        Expr::BinOp { left, right, .. } => pred_mentions_len(left) || pred_mentions_len(right),
+        Expr::UnaryOp { expr, .. } => pred_mentions_len(expr),
+        _ => false,
+    }
 }
 
 /// [P2-REFINE1-DEF] REQ-REFINE-1 definition-time: `{r: Int | pred}` return type
@@ -743,12 +767,33 @@ fn eval_closed_int_expr(expr: &Expr) -> Option<i64> {
 
 fn pred_holds_for_lit(pred: &Expr, binder: &str, val: i64) -> Option<bool> {
     match pred {
-        Expr::BinOp { op, left, right, .. } if op == "&&" => Some(
-            pred_holds_for_lit(left, binder, val)? && pred_holds_for_lit(right, binder, val)?,
-        ),
-        Expr::BinOp { op, left, right, .. } if op == "||" => Some(
-            pred_holds_for_lit(left, binder, val)? || pred_holds_for_lit(right, binder, val)?,
-        ),
+        // [P2-REFINE2] Kleene three-valued && / ||: a decided operand decides the
+        // connective even when the other side is unevaluable (e.g. a `len(xs)`
+        // measure call). Sound vs the interpreter: the evaluable fragment
+        // (literal/binder/neg comparisons) never traps at runtime, so a compile
+        // decision here agrees with every runtime path — `false && X` is false
+        // whether X evaluates, and if X itself traps the call could never
+        // succeed anyway (trap-or-violation either way).
+        Expr::BinOp { op, left, right, .. } if op == "&&" => {
+            match (
+                pred_holds_for_lit(left, binder, val),
+                pred_holds_for_lit(right, binder, val),
+            ) {
+                (Some(false), _) | (_, Some(false)) => Some(false),
+                (Some(true), Some(true)) => Some(true),
+                _ => None,
+            }
+        }
+        Expr::BinOp { op, left, right, .. } if op == "||" => {
+            match (
+                pred_holds_for_lit(left, binder, val),
+                pred_holds_for_lit(right, binder, val),
+            ) {
+                (Some(true), _) | (_, Some(true)) => Some(true),
+                (Some(false), Some(false)) => Some(false),
+                _ => None,
+            }
+        }
         Expr::BinOp { op, left, right, .. } => {
             let l = refine_as_int(left, binder, val)?;
             let r = refine_as_int(right, binder, val)?;
@@ -1377,6 +1422,102 @@ fn main(console: Console) -> Unit uses {console} {
 "#;
         let prog = parse(src).expect("parse");
         check_program(&prog).expect("param-dependent return refine stays soft");
+    }
+
+    #[test]
+    fn refine2_rejects_negative_literal_index_with_len_measure() {
+        // SPEC §4.4 REQ-REFINE-2: nth(xs, -1) is a type error, zero execution.
+        // `0 <= k` decides false; the len(xs) conjunct stays unknown (Kleene).
+        let src = r#"
+fn nth(xs: List<Int>, i: {k: Int | 0 <= k && k < len(xs)}) -> Int {
+    match xs.get(i) {
+        Some(v) => v,
+        None => -1,
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(nth([10, 20, 30], -1).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected P2-REFINE2 reject");
+        assert!(
+            err.0.contains("[P2-REFINE2]"),
+            "expected [P2-REFINE2] in {err}"
+        );
+    }
+
+    #[test]
+    fn refine2_accepts_in_range_literal_index() {
+        // 0 <= 1 decides true; 1 < len(xs) stays soft (prove / runtime tier).
+        let src = r#"
+fn nth(xs: List<Int>, i: {k: Int | 0 <= k && k < len(xs)}) -> Int {
+    match xs.get(i) {
+        Some(v) => v,
+        None => -1,
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(nth([10, 20, 30], 1).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("in-range literal index must typecheck");
+    }
+
+    #[test]
+    fn refine2_unbounded_literal_index_stays_soft() {
+        // Honest limit: 5 < len(xs) is undecidable here without list-length
+        // reasoning — call stays soft; the runtime refinement check guards it.
+        let src = r#"
+fn nth(xs: List<Int>, i: {k: Int | 0 <= k && k < len(xs)}) -> Int {
+    match xs.get(i) {
+        Some(v) => v,
+        None => -1,
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(nth([10, 20, 30], 5).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("unbounded literal index stays soft (runtime tier)");
+    }
+
+    #[test]
+    fn refine2_kleene_or_true_short_circuits() {
+        // k < 0 || k < len(xs) at k = -1: true || unknown = true → no reject,
+        // matching the interpreter's short-circuit `||`.
+        let src = r#"
+fn f(xs: List<Int>, i: {k: Int | k < 0 || k < len(xs)}) -> Int {
+    i
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(f([1], -1).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("true || unknown must not reject");
+    }
+
+    #[test]
+    fn refine2_kleene_second_conjunct_rejects() {
+        // (0 <= k && k < len(xs)) && k <= 100 at k = 200:
+        // left is unknown, right decides false → unknown && false = false → reject.
+        let src = r#"
+fn f(xs: List<Int>, i: {k: Int | 0 <= k && k < len(xs) && k <= 100}) -> Int {
+    i
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(f([1], 200).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected P2-REFINE2 reject via second conjunct");
+        assert!(
+            err.0.contains("[P2-REFINE2]"),
+            "expected [P2-REFINE2] in {err}"
+        );
     }
 
     #[test]

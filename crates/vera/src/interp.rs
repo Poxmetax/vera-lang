@@ -382,6 +382,20 @@ impl<'a> Interpreter<'a> {
                         }
                         return self.call_fn(fn_decl, argv);
                     }
+                    // [P2-REFINE2] `len(e)` measure form (refinement predicates,
+                    // SPEC §4.4 REQ-REFINE-2): only when `len` is neither a user
+                    // fn (checked above) nor a local binding — those still win
+                    // via their existing paths. The old path here was an
+                    // unconditional unbound-name trap, so no legal program
+                    // changes behavior.
+                    if name == "len" && args.len() == 1 && env.get("len").is_err() {
+                        return match self.eval_expr(&args[0], env)? {
+                            Value::List(items) => Ok(Value::Int(items.len() as i64)),
+                            other => Err(Trap(format!(
+                                "len(...) measure expects a List, got {other:?}"
+                            ))),
+                        };
+                    }
                 }
                 // First-class call: evaluate callee to a Closure.
                 match self.eval_expr(callee, env)? {
@@ -783,4 +797,71 @@ fn checked_mod(a: i64, b: i64) -> Result<i64, Trap> {
 }
 fn checked_neg(a: i64) -> Result<i64, Trap> {
     a.checked_neg().ok_or_else(|| Trap("Int overflow".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse;
+    use crate::typecheck::check_program;
+
+    fn run_checked(src: &str) -> Result<Console, Trap> {
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("typecheck");
+        let mut interp = Interpreter::new(&prog);
+        interp.run_main()?;
+        Ok(interp.into_console())
+    }
+
+    #[test]
+    fn len_measure_pred_runs_on_valid_call() {
+        // [P2-REFINE2] runtime leg of REQ-REFINE-2: a valid in-range call
+        // evaluates `len(xs)` in the param refinement and runs normally.
+        let src = r#"
+fn nth(xs: List<Int>, i: {k: Int | 0 <= k && k < len(xs)}) -> Int {
+    match xs.get(i) {
+        Some(v) => v,
+        None => -1,
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(nth([10, 20, 30], 1).show());
+}
+"#;
+        let console = run_checked(src).expect("valid call must run");
+        assert_eq!(console.writes, vec!["20".to_string()]);
+    }
+
+    #[test]
+    fn len_measure_pred_traps_on_unbounded_oob_index() {
+        // [P2-REFINE2] an index the checker could not bound stays soft at
+        // compile time and is caught by the runtime refinement check.
+        let src = r#"
+fn nth(xs: List<Int>, i: {k: Int | 0 <= k && k < len(xs)}) -> Int {
+    match xs.get(i) {
+        Some(v) => v,
+        None => -1,
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    let j: Int = 9;
+    console.print(nth([10, 20, 30], j).show());
+}
+"#;
+        let err = run_checked(src).expect_err("OOB runtime index must trap");
+        assert!(err.0.contains("refinement"), "{err}");
+    }
+
+    #[test]
+    fn len_measure_does_not_shadow_local_len_binding() {
+        // [P2-REFINE2] guard: a local `len` closure still wins over the measure.
+        let src = r#"
+fn main(console: Console) -> Unit uses {console} {
+    let len = fn (n: Int) -> Int { n + 100 };
+    console.print(len(1).show());
+}
+"#;
+        let console = run_checked(src).expect("local len closure must run");
+        assert_eq!(console.writes, vec!["101".to_string()]);
+    }
 }
