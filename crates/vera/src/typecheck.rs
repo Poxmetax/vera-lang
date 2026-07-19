@@ -23,6 +23,9 @@ struct Env<'a> {
     vars: HashMap<String, Type>,
     fns: &'a HashMap<String, FnDecl>,
     adt: &'a AdtEnv,
+    /// [P2-SOUND3] Declared return type of the enclosing fn / lambda — the type
+    /// a `?` early-return actually escapes into (None = unannotated lambda).
+    ret: Option<Type>,
 }
 
 impl<'a> Env<'a> {
@@ -33,6 +36,7 @@ impl<'a> Env<'a> {
             vars,
             fns: self.fns,
             adt: self.adt,
+            ret: self.ret.clone(),
         }
     }
 }
@@ -94,7 +98,12 @@ fn check_fn(
     for p in &fn_decl.params {
         vars.insert(p.name.clone(), p.ty.clone());
     }
-    let env = Env { vars, fns, adt };
+    let env = Env {
+        vars,
+        fns,
+        adt,
+        ret: Some(fn_decl.ret.clone()),
+    };
     for req in &fn_decl.requires {
         let t = infer_expr(req, &env)?;
         if !matches!(t, Type::Bool) {
@@ -113,6 +122,8 @@ fn check_fn(
             ),
         ));
     }
+    // [P2-REFINE1-DEF] hard reject when closed body falsifies return refine
+    check_ret_refine_body(fn_decl)?;
     let ens_env = env.extend("result".into(), fn_decl.ret.clone());
     for ens in &fn_decl.ensures {
         let t = infer_expr(ens, &ens_env)?;
@@ -136,6 +147,7 @@ fn check_block(block: &Block, env: &Env<'_>) -> Result<Type, TypeError> {
                         vars: e_vars.clone(),
                         fns: env.fns,
                         adt: env.adt,
+                        ret: env.ret.clone(),
                     },
                 )?;
                 if let Some(annot) = ty {
@@ -161,6 +173,7 @@ fn check_block(block: &Block, env: &Env<'_>) -> Result<Type, TypeError> {
                         vars: e_vars.clone(),
                         fns: env.fns,
                         adt: env.adt,
+                        ret: env.ret.clone(),
                     },
                 )?;
             }
@@ -170,6 +183,7 @@ fn check_block(block: &Block, env: &Env<'_>) -> Result<Type, TypeError> {
         vars: e_vars,
         fns: env.fns,
         adt: env.adt,
+        ret: env.ret.clone(),
     };
     if let Some(res) = &block.result {
         infer_expr(res, &env2)
@@ -521,6 +535,8 @@ fn infer_expr(expr: &Expr, env: &Env<'_>) -> Result<Type, TypeError> {
                                 format!("arg type {} != {}", at.to_str(), p.ty.to_str()),
                             ));
                         }
+                        // [P2-REFINE1] hard reject decidably-false refine on Int literals
+                        check_lit_arg_refine(a, p, *span)?;
                     }
                     return Ok(erase_refine(&fn_decl.ret));
                 }
@@ -581,9 +597,46 @@ fn infer_expr(expr: &Expr, env: &Env<'_>) -> Result<Type, TypeError> {
         )),
         Expr::Propagate { expr, span } => {
             let t = infer_expr(expr, env)?;
+            // [P2-SOUND3] `?` early-returns None/Err out of the enclosing fn/lambda,
+            // so its declared return type must be able to carry that value
+            // (interp unwraps EarlyReturn at exactly that boundary).
             match t {
-                Type::Option { inner } => Ok(*inner),
-                Type::Result { ok, .. } => Ok(*ok),
+                Type::Option { inner } => match &env.ret {
+                    Some(Type::Option { .. }) => Ok(*inner),
+                    Some(other) => Err(TypeError::at(
+                        *span,
+                        format!(
+                            "`?` on Option needs the enclosing return type to be Option<_>, but it is {}",
+                            other.to_str()
+                        ),
+                    )),
+                    None => Err(TypeError::at(
+                        *span,
+                        "`?` needs an annotated enclosing return type (annotate the lambda return)",
+                    )),
+                },
+                Type::Result { ok, err } => match &env.ret {
+                    Some(Type::Result { err: renv, .. }) if types_equal(&err, renv) => Ok(*ok),
+                    Some(Type::Result { err: renv, .. }) => Err(TypeError::at(
+                        *span,
+                        format!(
+                            "`?` error type {} != enclosing error type {}",
+                            err.to_str(),
+                            renv.to_str()
+                        ),
+                    )),
+                    Some(other) => Err(TypeError::at(
+                        *span,
+                        format!(
+                            "`?` on Result needs the enclosing return type to be Result<_, _>, but it is {}",
+                            other.to_str()
+                        ),
+                    )),
+                    None => Err(TypeError::at(
+                        *span,
+                        "`?` needs an annotated enclosing return type (annotate the lambda return)",
+                    )),
+                },
                 other => Err(TypeError::at(
                     *span,
                     format!("`?` propagation requires Option or Result, got {}", other.to_str()),
@@ -591,6 +644,138 @@ fn infer_expr(expr: &Expr, env: &Env<'_>) -> Result<Type, TypeError> {
             }
         }
         Expr::Block(b) => check_block(b, env),
+    }
+}
+
+/// [P2-REFINE1] REQ-REFINE-1 call-site slice: when an argument is an Int literal
+/// and the parameter refine pred is a closed QF-LIA comparison/&& tree over
+/// the binder + literals, evaluate it. Some(false) → type error (zero exec).
+/// Unevaluable / non-literal args stay soft (prove / runtime). Definition-time
+/// return-refine body reject: see [P2-REFINE1-DEF] `check_ret_refine_body`.
+fn check_lit_arg_refine(arg: &Expr, param: &Param, span: Span) -> Result<(), TypeError> {
+    let Type::Refine {
+        name: binder,
+        pred: Some(pred),
+    } = &param.ty
+    else {
+        return Ok(());
+    };
+    // [P2-REFINE1] negative literals parse as unary minus over a literal — they
+    // are literals too (the REQ-REFINE bounds cases are typically negative).
+    let value = match arg {
+        Expr::LitInt { value, .. } => *value,
+        Expr::UnaryOp { op, expr, .. } if op == "-" => match expr.as_ref() {
+            Expr::LitInt { value, .. } => match value.checked_neg() {
+                Some(v) => v,
+                None => return Ok(()),
+            },
+            _ => return Ok(()),
+        },
+        _ => return Ok(()),
+    };
+    if pred_holds_for_lit(pred, binder, value) == Some(false) {
+        return Err(TypeError::at(
+            span,
+            format!(
+                "[P2-REFINE1] arg {} = {value} violates parameter refinement",
+                param.name
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// [P2-REFINE1-DEF] REQ-REFINE-1 definition-time: `{r: Int | pred}` return type
+/// vs a *closed* body (Int literal / unary-minus / closed `if` tree). Decidable
+/// false → type error (zero exec). Param-dependent bodies and requires-guided
+/// binds stay soft (prove / runtime). See docs/pilot/P2_REFINE1_SLICE.md.
+fn check_ret_refine_body(fn_decl: &FnDecl) -> Result<(), TypeError> {
+    let Type::Refine {
+        name: binder,
+        pred: Some(pred),
+    } = &fn_decl.ret
+    else {
+        return Ok(());
+    };
+    // Stmt-bearing bodies need dataflow; keep soft for this slice.
+    if !fn_decl.body.stmts.is_empty() {
+        return Ok(());
+    }
+    let Some(result) = &fn_decl.body.result else {
+        return Ok(());
+    };
+    let Some(value) = eval_closed_int_expr(result) else {
+        return Ok(());
+    };
+    if pred_holds_for_lit(pred, binder, value) == Some(false) {
+        return Err(TypeError::at(
+            fn_decl.span,
+            format!(
+                "[P2-REFINE1-DEF] body returns {value} which violates return refinement of {}",
+                fn_decl.name
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn eval_closed_int_expr(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::LitInt { value, .. } => Some(*value),
+        Expr::UnaryOp { op, expr, .. } if op == "-" => eval_closed_int_expr(expr)?.checked_neg(),
+        Expr::IfExpr {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            // Empty binder => Names in cond fail closedness (soft).
+            let c = pred_holds_for_lit(cond, "", 0)?;
+            let branch = if c { then_body } else { else_body };
+            if !branch.stmts.is_empty() {
+                return None;
+            }
+            eval_closed_int_expr(branch.result.as_ref()?)
+        }
+        _ => None,
+    }
+}
+
+fn pred_holds_for_lit(pred: &Expr, binder: &str, val: i64) -> Option<bool> {
+    match pred {
+        Expr::BinOp { op, left, right, .. } if op == "&&" => Some(
+            pred_holds_for_lit(left, binder, val)? && pred_holds_for_lit(right, binder, val)?,
+        ),
+        Expr::BinOp { op, left, right, .. } if op == "||" => Some(
+            pred_holds_for_lit(left, binder, val)? || pred_holds_for_lit(right, binder, val)?,
+        ),
+        Expr::BinOp { op, left, right, .. } => {
+            let l = refine_as_int(left, binder, val)?;
+            let r = refine_as_int(right, binder, val)?;
+            match op.as_str() {
+                "<" => Some(l < r),
+                "<=" => Some(l <= r),
+                ">" => Some(l > r),
+                ">=" => Some(l >= r),
+                "==" => Some(l == r),
+                "!=" => Some(l != r),
+                _ => None,
+            }
+        }
+        Expr::UnaryOp { op, expr, .. } if op == "!" => {
+            Some(!pred_holds_for_lit(expr, binder, val)?)
+        }
+        Expr::LitBool { value, .. } => Some(*value),
+        _ => None,
+    }
+}
+
+fn refine_as_int(expr: &Expr, binder: &str, val: i64) -> Option<i64> {
+    match expr {
+        Expr::LitInt { value, .. } => Some(*value),
+        Expr::Name { name, .. } if name == binder => Some(val),
+        Expr::UnaryOp { op, expr, .. } if op == "-" => Some(-refine_as_int(expr, binder, val)?),
+        _ => None,
     }
 }
 
@@ -628,6 +813,7 @@ fn infer_lambda(
             vars: e,
             fns: env.fns,
             adt: env.adt,
+            ret: ret.cloned(),
         },
     )?;
     if let Some(r) = ret {
@@ -688,6 +874,7 @@ fn check_hof_unary(
                     vars: e,
                     fns: env.fns,
                     adt: env.adt,
+                    ret: ret.clone(),
                 },
             )?;
             if let Some(r) = ret {
@@ -761,6 +948,7 @@ fn check_hof_binary(
                     vars: e,
                     fns: env.fns,
                     adt: env.adt,
+                    ret: ret.clone(),
                 },
             )?;
             if let Some(r) = ret {
@@ -906,6 +1094,7 @@ fn check_match(
             vars: e,
             fns: env.fns,
             adt: env.adt,
+            ret: env.ret.clone(),
         };
         arm_tys.push(infer_expr(&arm.body, &arm_env)?);
     }
@@ -1069,5 +1258,177 @@ fn check_pattern(
                 )),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse;
+
+    #[test]
+    fn refine1_rejects_out_of_range_literal_call() {
+        // SPEC §4.4 REQ-REFINE-1: apply_discount(100, 150) is a type error, zero exec.
+        let src = r#"
+fn apply_discount(price: {p: Int | p >= 0}, pct: {d: Int | 0 <= d && d <= 100}) -> Int {
+    price
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(apply_discount(100, 150).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected P2-REFINE1 reject");
+        assert!(
+            err.0.contains("[P2-REFINE1]"),
+            "expected [P2-REFINE1] in {err}"
+        );
+    }
+
+    #[test]
+    fn refine1_accepts_in_range_literal_call() {
+        let src = r#"
+fn apply_discount(price: {p: Int | p >= 0}, pct: {d: Int | 0 <= d && d <= 100}) -> Int {
+    price
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(apply_discount(100, 10).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("in-range call must typecheck");
+    }
+
+    #[test]
+    fn refine1_rejects_negative_literal_call() {
+        // [P2-REFINE1] `-5` (unary minus over a literal) is a literal for reject purposes.
+        let src = r#"
+fn pos(x: {x: Int | x >= 1}) -> Int {
+    x
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(pos(-5).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected P2-REFINE1 reject");
+        assert!(err.0.contains("[P2-REFINE1]"), "{err}");
+    }
+
+    #[test]
+    fn refine1_def_rejects_negative_literal_return() {
+        // [P2-REFINE1-DEF] SPEC section 4.4 definition-time negative return.
+        let src = r#"
+fn bad() -> {r: Int | r >= 0} {
+    -1
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(bad().show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected P2-REFINE1-DEF reject");
+        assert!(
+            err.0.contains("[P2-REFINE1-DEF]"),
+            "expected [P2-REFINE1-DEF] in {err}"
+        );
+    }
+
+    #[test]
+    fn refine1_def_accepts_nonneg_literal_return() {
+        let src = r#"
+fn good() -> {r: Int | r >= 0} {
+    0
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(good().show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("nonneg literal return must typecheck");
+    }
+
+    #[test]
+    fn refine1_def_rejects_closed_ite_false_branch() {
+        // Closed ite: cond + branches are literals → decidable without SMT.
+        let src = r#"
+fn bad() -> {r: Int | r >= 0} {
+    if 1 < 0 { 1 } else { -1 }
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(bad().show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected P2-REFINE1-DEF reject");
+        assert!(err.0.contains("[P2-REFINE1-DEF]"), "{err}");
+    }
+
+    #[test]
+    fn refine1_def_soft_on_param_dependent_body() {
+        // Body mentions param - not closed; stay soft (prove/runtime).
+        let src = r#"
+fn id(x: Int) -> {r: Int | r >= 0} {
+    x
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(id(1).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("param-dependent return refine stays soft");
+    }
+
+    #[test]
+    fn propagate_into_plain_int_ret_is_rejected() {
+        // [P2-SOUND3] guard: `?` must not escape a fn whose return type cannot carry None.
+        let src = r#"
+fn first(x: Option<Int>) -> Int {
+    let y: Int = x?;
+    y
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(first(Some(1)).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected P2-SOUND3 reject");
+        assert!(err.0.contains("`?` on Option"), "{err}");
+    }
+
+    #[test]
+    fn propagate_into_option_ret_is_ok() {
+        // [P2-SOUND3] the propagate.vera shape stays legal.
+        let src = r#"
+fn dig(xs: List<Int>) -> Option<Int> {
+    let h: Int = xs.head()?;
+    Some(h)
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(match dig([1]) {
+        Some(n) => n.show(),
+        None => "none",
+    });
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("Option-into-Option `?` must typecheck");
+    }
+
+    #[test]
+    fn propagate_result_err_mismatch_is_rejected() {
+        // [P2-SOUND3] Err payload type must survive the early return unchanged.
+        let src = r#"
+fn conv(r: Result<Int, Int>) -> Result<Int, Str> {
+    let x: Int = r?;
+    Ok(x)
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print("n");
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected err-type mismatch reject");
+        assert!(err.0.contains("error type"), "{err}");
     }
 }

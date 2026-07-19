@@ -63,8 +63,12 @@ fn encode_expr(expr: &Expr) -> Result<String, String> {
                 "+" => Ok(format!("(+ {l} {r})")),
                 "-" => Ok(format!("(- {l} {r})")),
                 "*" => Ok(format!("(* {l} {r})")),
-                "/" => Ok(format!("(div {l} {r})")),
-                "%" => Ok(format!("(mod {l} {r})")),
+                // [P2-SOUND1] SMT-LIB div/mod are Euclidean; the interpreter's
+                // checked_div/% truncate toward zero — encoding them lets Z3 prove
+                // obligations the runtime then violates (e.g. x/2 at x = -7).
+                "/" | "%" => Err(format!(
+                    "binop {op} not in SMT slice (Euclidean div/mod vs truncating runtime)"
+                )),
                 "==" => Ok(format!("(= {l} {r})")),
                 "!=" => Ok(format!("(not (= {l} {r}))")),
                 "<" => Ok(format!("(< {l} {r})")),
@@ -402,8 +406,39 @@ fn walk_expr_calls(
     }
 }
 
+/// [P2-SOUND2] Call-site discharge is only sound for closed literal argument
+/// terms: an open term (caller variable) reaches Z3 as an undeclared /
+/// unconstrained symbol and yields a spurious REFUTED — caller-context WP is
+/// not part of the Phase 2 slice.
+fn expr_is_closed(expr: &Expr) -> bool {
+    match expr {
+        Expr::LitInt { .. } | Expr::LitBool { .. } => true,
+        Expr::UnaryOp { expr, .. } => expr_is_closed(expr),
+        Expr::BinOp { left, right, .. } => expr_is_closed(left) && expr_is_closed(right),
+        _ => false,
+    }
+}
+
 fn prove_call_site(caller: &str, callee: &FnDecl, args: &[Expr], out: &mut Vec<Obligation>) {
     if args.len() != callee.params.len() {
+        return;
+    }
+    if !args.iter().all(expr_is_closed) {
+        if !callee.requires.is_empty()
+            || callee
+                .params
+                .iter()
+                .any(|p| matches!(p.ty, Type::Refine { pred: Some(_), .. }))
+        {
+            out.push(Obligation {
+                target: format!("{caller} call {} (args)", callee.name),
+                kind: "call_requires".into(),
+                status: Discharge::RuntimeChecked {
+                    reason: "argument is not a closed literal term (caller-context WP not in Phase 2 slice)"
+                        .into(),
+                },
+            });
+        }
         return;
     }
     let mut arg_smt = Vec::new();
@@ -595,6 +630,55 @@ fn main(console: Console) -> Unit uses {console} {
         assert!(
             proved.iter().any(|o| o.kind == "call_requires"),
             "expected proved call_requires for clamp(5,0,10)"
+        );
+    }
+
+    #[test]
+    fn div_stays_runtime_checked() {
+        // [P2-SOUND1] guard: SMT div is Euclidean, runtime truncates — never prove through `/`.
+        let src = r#"
+fn half_leq(x: Int) -> {r: Int | r * 2 <= x} {
+    x / 2
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print("ok");
+}
+"#;
+        let prog = parse(src).unwrap();
+        check_program(&prog).unwrap();
+        let obs = prove_program(&prog).unwrap();
+        assert!(!obs.is_empty(), "expected a return-refine obligation");
+        assert!(
+            obs.iter()
+                .all(|o| matches!(o.status, Discharge::RuntimeChecked { .. })),
+            "{obs:?}"
+        );
+    }
+
+    #[test]
+    fn open_call_args_stay_runtime_checked() {
+        // [P2-SOUND2] guard: variable args must not reach Z3 as free symbols (spurious REFUTED).
+        let src = r#"
+fn pos_id(x: {x: Int | x >= 1}) -> Int {
+    x
+}
+fn main(console: Console) -> Unit uses {console} {
+    let v: Int = 5;
+    console.print(pos_id(v).show());
+}
+"#;
+        let prog = parse(src).unwrap();
+        check_program(&prog).unwrap();
+        let obs = prove_program(&prog).unwrap();
+        assert!(
+            obs.iter().any(|o| o.kind == "call_requires"
+                && matches!(o.status, Discharge::RuntimeChecked { .. })),
+            "{obs:?}"
+        );
+        assert!(
+            obs.iter()
+                .all(|o| !matches!(o.status, Discharge::Refuted { .. })),
+            "{obs:?}"
         );
     }
 }

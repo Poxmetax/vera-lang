@@ -21,7 +21,10 @@ Expected: ≥1 `[PROVED]` on `clamp` return refine and/or ensures; call-site `lo
 
 ## What this does **not** yet claim (remaining CONF-P2)
 
-- Full **REQ-REFINE-1** compile-time reject of `apply_discount(100, 150)` as a hard type error (slice reports REFUTED/RUNTIME; no typecheck integration yet).
+- `/` and `%` are **excluded** from the encodable fragment ([P2-SOUND1], independent review 2026-07-19): SMT-LIB `div`/`mod` are Euclidean while the interpreter truncates toward zero, so encoding them let `--prove` mark obligations PROVED that the runtime then trapped (`x / 2` at `x = -7`). They stay runtime-checked.
+- Call-site discharge requires **closed literal arguments** ([P2-SOUND2], same review): an open (variable) argument previously reached Z3 as an undeclared/unconstrained symbol and produced spurious REFUTED; such call sites are now reported RUNTIME-CHECKED.
+- **REQ-REFINE-1 call-site + closed definition-time:** [P2-REFINE1] / [P2-REFINE1-DEF] in typecheck.rs (see docs/pilot/P2_REFINE1_SLICE.md). Requires-guided / param-dependent bodies still soft.
+- Full SMT-backed refine reject for non-literal args (still REFUTED/RUNTIME via --prove only).
 - **REQ-REFINE-2** / `len` measures on `List`.
 - Label lattice / IFC, JSON `FixPatch`, multi-prover (CVC5), proof certificates / check elision in the interpreter.
 - Linking the `z3` crate for in-process solving (optional later; subprocess is intentional).

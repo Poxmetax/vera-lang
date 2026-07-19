@@ -10,8 +10,19 @@ use std::process::ExitCode;
 use vera::{check_program, format_report, parse, prove_program, CodebaseStore, Discharge, Interpreter};
 
 fn usage() {
+    // [SOFT-PROVE-HELP] clearer Phase-2 flag description for operators / Fable handoff
     eprintln!(
         "usage: vera <file.vera> [--hash-only] [--dump-ast] [--round-trip] [--prove]"
+    );
+    eprintln!(
+        "  --prove   Phase 2 VC slice: discharge Int/bool/ite requires·ensures·{{x:Int|pred}} via Z3"
+    );
+    eprintln!(
+        "            prints [PROVED] / [RUNTIME-CHECKED] / [REFUTED] (exit 3 if any REFUTED)"
+    );
+    // [SOFT-EXIT-HELP] document CLI exit codes (trap=2, refute=3)
+    eprintln!(
+        "exit codes: 0 ok | 1 usage/parse/type/prove-err | 2 runtime trap | 3 any REFUTED (--prove)"
     );
 }
 
@@ -83,6 +94,11 @@ fn main() -> ExitCode {
     }
 
     if prove {
+        // [SOFT-Z3-PATH] discovery transparency — print resolved binary once (non-fatal if missing)
+        match vera::smt::find_z3() {
+            Ok(p) => eprintln!("[SOFT-Z3-PATH] using Z3: {}", p.display()),
+            Err(e) => eprintln!("[SOFT-Z3-PATH] not resolved: {e}"),
+        }
         match prove_program(&program) {
             Ok(obs) => {
                 print!("{}", format_report(&path.display().to_string(), &obs));
