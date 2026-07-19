@@ -1,6 +1,7 @@
 //! Tree-walking interpreter with Console capability + runtime contracts (Phase 1).
 
 use crate::ast::*;
+use crate::vc::ProvedSet;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -77,6 +78,12 @@ impl Env {
 pub struct Interpreter<'a> {
     fns: HashMap<String, &'a FnDecl>,
     console: Console,
+    /// [P2D-ELIDE] Fn-level obligations proved in THIS process run; empty by
+    /// default, so `new()` keeps today's check-everything semantics.
+    proved: ProvedSet,
+    /// [P2D-ELIDE] How many runtime checks were skipped under proof
+    /// (instrumentation for tests / the `--prove-run` report line).
+    pub elided_checks: usize,
 }
 
 impl<'a> Interpreter<'a> {
@@ -89,7 +96,19 @@ impl<'a> Interpreter<'a> {
         Self {
             fns,
             console: Console::default(),
+            proved: ProvedSet::default(),
+            elided_checks: 0,
         }
+    }
+
+    /// [P2D-ELIDE] Interpreter with proof-gated check elision (SPEC DP6 /
+    /// INV-1): fn-level `ensures` / return-refine checks whose obligations are
+    /// PROVED in `proved` are skipped; everything else still checks. Never
+    /// speculative — an empty set (the `new()` default) elides nothing.
+    pub fn with_proved(program: &'a Program, proved: ProvedSet) -> Self {
+        let mut interp = Self::new(program);
+        interp.proved = proved;
+        interp
     }
 
     pub fn into_console(self) -> Console {
@@ -153,10 +172,23 @@ impl<'a> Interpreter<'a> {
         {
             env.insert(name.clone(), result.clone());
             env.insert("result".into(), result.clone());
-            self.check_refine_pred(name, pred, &env)?;
+            // [P2D-ELIDE] proof-gated elision (SPEC DP6 / INV-1): skip only the
+            // pred EVAL when this fn's return refine is PROVED this run; the
+            // env inserts above are kept so observable behavior is unchanged.
+            if self.proved.return_refine_proved(&fn_decl.name) {
+                self.elided_checks += 1;
+            } else {
+                self.check_refine_pred(name, pred, &env)?;
+            }
         }
         env.insert("result".into(), result.clone());
-        for ens in &fn_decl.ensures {
+        for (i, ens) in fn_decl.ensures.iter().enumerate() {
+            // [P2D-ELIDE] a PROVED ensures[i] is skipped; unproved / refuted
+            // clauses of the same fn still check (or trap) exactly as today.
+            if self.proved.ensures_proved(&fn_decl.name, i) {
+                self.elided_checks += 1;
+                continue;
+            }
             match self.eval_expr(ens, &env)? {
                 Value::Bool(true) => {}
                 Value::Bool(false) => {
@@ -863,5 +895,115 @@ fn main(console: Console) -> Unit uses {console} {
 "#;
         let console = run_checked(src).expect("local len closure must run");
         assert_eq!(console.writes, vec!["101".to_string()]);
+    }
+
+    // ---- [P2D-ELIDE] proof-gated check elision (SPEC DP6 / INV-1) ----
+
+    fn prove_and_build(src: &str) -> (crate::ast::Program, ProvedSet) {
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("typecheck");
+        let obs = crate::vc::prove_program(&prog).expect("prove");
+        let proved = ProvedSet::build(&prog, &obs);
+        (prog, proved)
+    }
+
+    #[test]
+    fn elide_skips_proved_fn_level_checks() {
+        // CONF-P2: a contract SMT-proved end-to-end has its runtime check
+        // elided; the default interpreter (no proved-set) still checks all.
+        let src = r#"
+fn clamp(x: Int, lo: Int, hi: Int) -> {r: Int | r >= lo && r <= hi}
+    requires lo <= hi
+    ensures result >= lo
+    ensures result <= hi
+{
+    if x < lo { lo } else { if x > hi { hi } else { x } }
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(clamp(5, 0, 10).show());
+}
+"#;
+        let (prog, proved) = prove_and_build(src);
+        assert!(proved.return_refine_proved("clamp"), "clamp return refine must be proved");
+        assert!(proved.ensures_proved("clamp", 0) && proved.ensures_proved("clamp", 1));
+        let mut interp = Interpreter::with_proved(&prog, proved);
+        interp.run_main().expect("elided run must succeed");
+        assert_eq!(interp.console.writes, vec!["5".to_string()]);
+        // 1 call x (return_refine + ensures[0] + ensures[1]) = 3 skips.
+        assert_eq!(interp.elided_checks, 3, "expected 3 elided checks");
+        // INV-1 gate closed by default: plain `new` elides nothing.
+        let mut plain = Interpreter::new(&prog);
+        plain.run_main().expect("plain run must succeed");
+        assert_eq!(plain.elided_checks, 0);
+    }
+
+    #[test]
+    fn elide_never_skips_unproved_ensures() {
+        // INV-1 negative: `/` is outside the SMT fragment [P2-SOUND1], so the
+        // ensures stays RuntimeChecked -> must still trap even with a
+        // ProvedSet armed from the same prove run.
+        let src = r#"
+fn half(x: Int) -> Int
+    ensures result >= 100
+{
+    x / 2
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(half(4).show());
+}
+"#;
+        let (prog, proved) = prove_and_build(src);
+        assert!(!proved.ensures_proved("half", 0), "unencodable ensures must not be proved");
+        let mut interp = Interpreter::with_proved(&prog, proved);
+        let err = interp.run_main().expect_err("violated unproved ensures must trap");
+        assert!(err.0.contains("ensures violated"), "{err}");
+        assert_eq!(interp.elided_checks, 0);
+    }
+
+    #[test]
+    fn elide_never_skips_refuted_ensures() {
+        // A REFUTED obligation is never in the proved set -> still checked.
+        let src = r#"
+fn bump(x: Int) -> Int
+    ensures result >= 999
+{
+    x + 1
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(bump(1).show());
+}
+"#;
+        let (prog, proved) = prove_and_build(src);
+        assert!(!proved.ensures_proved("bump", 0), "refuted ensures must not be proved");
+        let mut interp = Interpreter::with_proved(&prog, proved);
+        let err = interp.run_main().expect_err("refuted ensures must still trap at runtime");
+        assert!(err.0.contains("ensures violated"), "{err}");
+        assert_eq!(interp.elided_checks, 0);
+    }
+
+    #[test]
+    fn elide_excludes_duplicate_fn_names() {
+        // The interpreter resolves calls by name (last decl wins), so a proof
+        // for one duplicate must never elide checks on the other.
+        let src = r#"
+fn f() -> {r: Int | r >= 0} {
+    1
+}
+fn f() -> {r: Int | r >= 0} {
+    2
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(f().show());
+}
+"#;
+        let (prog, proved) = prove_and_build(src);
+        assert!(
+            !proved.return_refine_proved("f"),
+            "duplicated fn name must be excluded from the proved set"
+        );
+        let mut interp = Interpreter::with_proved(&prog, proved);
+        interp.run_main().expect("run");
+        assert_eq!(interp.console.writes, vec!["2".to_string()], "last decl wins");
+        assert_eq!(interp.elided_checks, 0);
     }
 }

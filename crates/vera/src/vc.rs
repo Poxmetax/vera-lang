@@ -6,7 +6,7 @@
 
 use crate::ast::*;
 use crate::smt::{check_smtlib, SatResult, SmtError};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -35,6 +35,77 @@ pub struct Obligation {
     /// [P2B-DIAG] Source anchor: the fn declaration span for fn-level
     /// obligations, the call expression span for call-site obligations.
     pub span: Option<Span>,
+    /// [P2D-ELIDE] Structured identity for fn-level obligations (`ensures` /
+    /// `return_refine`): the declaring fn's name. `None` for call-site
+    /// obligations — those are never elided in this slice.
+    pub fn_name: Option<String>,
+    /// [P2D-ELIDE] Which `ensures` clause (declaration order) a fn-level
+    /// `ensures` obligation covers; `None` for every other kind.
+    pub ensures_index: Option<usize>,
+}
+
+/// [P2D-ELIDE] Fn-level PROVED obligations, keyed for the interpreter's
+/// proof-gated check elision (SPEC DP6 / INV-1). Built per process run from
+/// `prove_program` output on the same `Program` value — never persisted, so
+/// there is no stale-certificate path (INV-2 concern deferred with the
+/// certificate store). Call-site obligations are deliberately excluded (the
+/// interpreter has no call-site identity yet).
+#[derive(Debug, Clone, Default)]
+pub struct ProvedSet {
+    ensures: HashSet<(String, usize)>,
+    return_refines: HashSet<String>,
+}
+
+impl ProvedSet {
+    /// Build from prove results. Functions whose name appears on more than one
+    /// declaration are excluded wholesale: the interpreter resolves calls by
+    /// name (last declaration wins), so a proof for one duplicate must never
+    /// elide checks on the other.
+    pub fn build(program: &Program, obligations: &[Obligation]) -> Self {
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut dup: HashSet<&str> = HashSet::new();
+        for f in &program.functions {
+            if !seen.insert(f.name.as_str()) {
+                dup.insert(f.name.as_str());
+            }
+        }
+        let mut set = ProvedSet::default();
+        for o in obligations {
+            if !matches!(o.status, Discharge::Proved) {
+                continue;
+            }
+            let Some(name) = &o.fn_name else { continue };
+            if dup.contains(name.as_str()) {
+                continue;
+            }
+            match (o.kind.as_str(), o.ensures_index) {
+                ("ensures", Some(i)) => {
+                    set.ensures.insert((name.clone(), i));
+                }
+                ("return_refine", _) => {
+                    set.return_refines.insert(name.clone());
+                }
+                _ => {}
+            }
+        }
+        set
+    }
+
+    pub fn ensures_proved(&self, fn_name: &str, index: usize) -> bool {
+        self.ensures.contains(&(fn_name.to_string(), index))
+    }
+
+    pub fn return_refine_proved(&self, fn_name: &str) -> bool {
+        self.return_refines.contains(fn_name)
+    }
+
+    pub fn len(&self) -> usize {
+        self.ensures.len() + self.return_refines.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 fn encode_expr(expr: &Expr) -> Result<String, String> {
@@ -267,6 +338,8 @@ fn prove_fn(fn_decl: &FnDecl, out: &mut Vec<Obligation>) {
                         reason: reason.clone(),
                     },
                     span: Some(fn_decl.span),
+                    fn_name: Some(fn_decl.name.clone()),
+                    ensures_index: Some(i),
                 });
             }
             if let Type::Refine { pred: Some(_), .. } = &fn_decl.ret {
@@ -275,6 +348,8 @@ fn prove_fn(fn_decl: &FnDecl, out: &mut Vec<Obligation>) {
                     kind: "return_refine".into(),
                     status: Discharge::RuntimeChecked { reason },
                     span: Some(fn_decl.span),
+                    fn_name: Some(fn_decl.name.clone()),
+                    ensures_index: None,
                 });
             }
             return;
@@ -292,6 +367,8 @@ fn prove_fn(fn_decl: &FnDecl, out: &mut Vec<Obligation>) {
             kind: "ensures".into(),
             status,
             span: Some(fn_decl.span),
+            fn_name: Some(fn_decl.name.clone()),
+            ensures_index: Some(i),
         });
     }
 
@@ -316,6 +393,8 @@ fn prove_fn(fn_decl: &FnDecl, out: &mut Vec<Obligation>) {
             kind: "return_refine".into(),
             status,
             span: Some(fn_decl.span),
+            fn_name: Some(fn_decl.name.clone()),
+            ensures_index: None,
         });
     }
 }
@@ -451,6 +530,8 @@ fn prove_call_site(
                         .into(),
                 },
                 span: Some(call_span),
+                fn_name: None,
+                ensures_index: None,
             });
         }
         return;
@@ -471,6 +552,8 @@ fn prove_call_site(
                         kind: "call_requires".into(),
                         status: Discharge::RuntimeChecked { reason },
                         span: Some(call_span),
+                        fn_name: None,
+                        ensures_index: None,
                     });
                 }
                 return;
@@ -489,6 +572,8 @@ fn prove_call_site(
             kind: "call_requires".into(),
             status,
             span: Some(call_span),
+            fn_name: None,
+            ensures_index: None,
         });
     }
 
@@ -507,6 +592,8 @@ fn prove_call_site(
                 kind: "call_arg_refine".into(),
                 status,
                 span: Some(call_span),
+                fn_name: None,
+                ensures_index: None,
             });
         }
     }

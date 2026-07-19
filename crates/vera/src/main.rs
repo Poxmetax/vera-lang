@@ -7,7 +7,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use vera::{check_program, format_report, parse, prove_program, CodebaseStore, Discharge, Interpreter};
+use vera::{
+    check_program, format_report, parse, prove_program, CodebaseStore, Discharge, Interpreter,
+    ProvedSet,
+};
 
 fn usage() {
     // [SOFT-PROVE-HELP] clearer Phase-2 flag description for operators / Fable handoff
@@ -23,6 +26,10 @@ fn usage() {
     // [P2B-DIAG] machine-readable diagnostics mode
     eprintln!(
         "  --diag-json  structured JSON diagnostics (parse+typecheck; with --prove also obligations); does not run the program"
+    );
+    // [P2D-ELIDE] proof-gated run mode
+    eprintln!(
+        "  --prove-run  prove first, then run with proof-gated check elision (INV-1); any REFUTED -> exit 3, no run. --prove alone never runs and takes precedence"
     );
     // [SOFT-EXIT-HELP] document CLI exit codes (trap=2, refute=3)
     eprintln!(
@@ -40,6 +47,7 @@ fn main() -> ExitCode {
     let mut dump_ast = false;
     let mut round_trip = false;
     let mut prove = false;
+    let mut prove_run = false;
     let mut diag_json = false;
     args.retain(|a| match a.as_str() {
         "--hash-only" => {
@@ -56,6 +64,10 @@ fn main() -> ExitCode {
         }
         "--prove" => {
             prove = true;
+            false
+        }
+        "--prove-run" => {
+            prove_run = true;
             false
         }
         "--diag-json" => {
@@ -133,6 +145,36 @@ fn main() -> ExitCode {
         }
     }
 
+    // [P2D-ELIDE] opt-in run-after-prove (SPEC DP6 / INV-1): prove first, then
+    // run with proved fn-level checks elided. Any REFUTED -> report + exit 3
+    // without running. The default run path (no flag) elides nothing.
+    let mut proved_set: Option<ProvedSet> = None;
+    if prove_run {
+        match vera::smt::find_z3() {
+            Ok(p) => eprintln!("[SOFT-Z3-PATH] using Z3: {}", p.display()),
+            Err(e) => eprintln!("[SOFT-Z3-PATH] not resolved: {e}"),
+        }
+        match prove_program(&program) {
+            Ok(obs) => {
+                print!("{}", format_report(&path.display().to_string(), &obs));
+                if obs.iter().any(|o| matches!(o.status, Discharge::Refuted { .. })) {
+                    eprintln!("[P2D-ELIDE] refuted obligation(s) -- not running");
+                    return ExitCode::from(3);
+                }
+                let ps = ProvedSet::build(&program, &obs);
+                eprintln!(
+                    "[P2D-ELIDE] proof-gated elision armed: {} fn-level obligation(s)",
+                    ps.len()
+                );
+                proved_set = Some(ps);
+            }
+            Err(e) => {
+                eprintln!("prove error: {e}");
+                return ExitCode::from(1);
+            }
+        }
+    }
+
     let mut store = CodebaseStore::new();
     let entries = store.load_program(&program);
     println!("content-addressed definitions:");
@@ -146,9 +188,17 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let mut interp = Interpreter::new(&program);
+    let mut interp = match proved_set {
+        Some(ps) => Interpreter::with_proved(&program, ps),
+        None => Interpreter::new(&program),
+    };
     match interp.run_main() {
-        Ok(_) => ExitCode::SUCCESS,
+        Ok(_) => {
+            if prove_run {
+                eprintln!("[P2D-ELIDE] elided {} runtime check(s)", interp.elided_checks);
+            }
+            ExitCode::SUCCESS
+        }
         Err(e) => {
             eprintln!("trap: {e}");
             ExitCode::from(2)

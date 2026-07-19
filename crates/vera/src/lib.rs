@@ -20,7 +20,7 @@ pub use parser::{parse, ParseError};
 pub use render::render_program;
 pub use store::{CodebaseStore, EditOp, EditTransaction, StoreError};
 pub use typecheck::{check_program, TypeError};
-pub use vc::{format_report, prove_program, Discharge, Obligation, VcError};
+pub use vc::{format_report, prove_program, Discharge, Obligation, ProvedSet, VcError};
 
 #[cfg(test)]
 mod tests {
