@@ -6,6 +6,7 @@
 pub mod ast;
 pub mod diag;
 pub mod interp;
+pub mod label;
 pub mod lexer;
 pub mod parser;
 pub mod render;
@@ -16,6 +17,7 @@ pub mod vc;
 
 pub use diag::{diagnose_program, diagnose_source, DiagReport, Diagnostic};
 pub use interp::{Console, Interpreter, Trap};
+pub use label::{Atom, Label};
 pub use parser::{parse, ParseError};
 pub use render::render_program;
 pub use store::{CodebaseStore, EditOp, EditTransaction, StoreError};
