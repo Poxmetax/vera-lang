@@ -64,7 +64,7 @@ More examples: [`examples/README.md`](examples/README.md)
 - Pilot evidence: [`docs/pilot/REPORT.md`](docs/pilot/REPORT.md)
 - SMT spike: [`docs/pilot/SMT_SPIKE_REPORT.md`](docs/pilot/SMT_SPIKE_REPORT.md)
 - Known gaps: [`docs/pilot/KNOWN_GAPS.md`](docs/pilot/KNOWN_GAPS.md)
-- GitHub visibility checklist (maintainers): [`docs/GITHUB_VISIBILITY.md`](docs/GITHUB_VISIBILITY.md)
+- Promo / GitHub visibility materials: deferred (removed from tree; re-add later if needed).
 
 ## Contributing
 
