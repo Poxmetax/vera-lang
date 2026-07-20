@@ -578,6 +578,9 @@ fn infer_expr(expr: &Expr, env: &Env<'_>) -> Result<Type, TypeError> {
                         }
                         // [P2-REFINE1] hard reject decidably-false refine on Int literals
                         check_lit_arg_refine(a, p, *span)?;
+                        // [GAPC1-SYM-LEN] hard reject the symbolic same-term
+                        // len-as-index case REQ-REFINE-2 names (P2C deferral)
+                        check_sym_len_arg_refine(a, p, fn_decl, args, *span)?;
                     }
                     return Ok(erase_refine(&fn_decl.ret));
                 }
@@ -734,6 +737,129 @@ fn check_lit_arg_refine(arg: &Expr, param: &Param, span: Span) -> Result<(), Typ
         ));
     }
     Ok(())
+}
+
+/// [GAPC1-SYM-LEN] REQ-REFINE-2's deferred symbolic case (P2C honest limit):
+/// an argument of the shape `xs.len()` passed for a refined index parameter
+/// whose predicate bounds the binder by `len(xs_param)` of the SAME list.
+/// Substituting `k := len(xs_param)` makes both comparison sides the same
+/// term, so the comparison decides by reflexivity alone (`<`/`>`/`!=` false,
+/// `<=`/`>=`/`==` true) — no list value or length is needed. Scope: the
+/// `.len()` receiver and the list argument must be plain `Name`s (immutable
+/// bindings denote the same value at both positions — effect-free, so the
+/// same-term claim is sound). Anything else stays soft -> prove / runtime
+/// (P2C design).
+fn check_sym_len_arg_refine(
+    arg: &Expr,
+    param: &Param,
+    fn_decl: &FnDecl,
+    args: &[Expr],
+    span: Span,
+) -> Result<(), TypeError> {
+    let Type::Refine {
+        name: binder,
+        pred: Some(pred),
+    } = &param.ty
+    else {
+        return Ok(());
+    };
+    // The argument must be exactly `<name>.len()` (the List measure method).
+    let Expr::Call {
+        callee,
+        args: margs,
+        ..
+    } = arg
+    else {
+        return Ok(());
+    };
+    let Expr::FieldAccess { obj, field, .. } = callee.as_ref() else {
+        return Ok(());
+    };
+    if field != "len" || !margs.is_empty() {
+        return Ok(());
+    }
+    let Expr::Name { name: recv, .. } = obj.as_ref() else {
+        return Ok(());
+    };
+    // param -> arg substitution: every callee parameter that receives the
+    // SAME variable as the `.len()` receiver instantiates the predicate's
+    // `len(<that param>)` to `len(recv)` — the argument's own value.
+    for (q, qa) in fn_decl.params.iter().zip(args.iter()) {
+        if !matches!(qa, Expr::Name { name, .. } if name == recv) {
+            continue;
+        }
+        if pred_holds_for_sym_len(pred, binder, &q.name) == Some(false) {
+            return Err(TypeError::at(
+                span,
+                format!(
+                    "[GAPC1-SYM-LEN] arg {} = {recv}.len() violates parameter refinement (same-term len bound is decidably false)",
+                    param.name
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// [GAPC1-SYM-LEN] Kleene evaluation of a refinement predicate under the
+/// symbolic substitution `binder := len(xs_param)`. A comparison decides only
+/// when BOTH sides denote that same symbolic value (the binder itself or the
+/// `len(xs_param)` measure call); mixed literal/symbolic sides stay unknown,
+/// which keeps e.g. `k < 0 || k < len(xs)` soft (conservative by design —
+/// this slice does not pretend to be a solver).
+fn pred_holds_for_sym_len(pred: &Expr, binder: &str, xs_param: &str) -> Option<bool> {
+    match pred {
+        Expr::BinOp { op, left, right, .. } if op == "&&" => {
+            match (
+                pred_holds_for_sym_len(left, binder, xs_param),
+                pred_holds_for_sym_len(right, binder, xs_param),
+            ) {
+                (Some(false), _) | (_, Some(false)) => Some(false),
+                (Some(true), Some(true)) => Some(true),
+                _ => None,
+            }
+        }
+        Expr::BinOp { op, left, right, .. } if op == "||" => {
+            match (
+                pred_holds_for_sym_len(left, binder, xs_param),
+                pred_holds_for_sym_len(right, binder, xs_param),
+            ) {
+                (Some(true), _) | (_, Some(true)) => Some(true),
+                (Some(false), Some(false)) => Some(false),
+                _ => None,
+            }
+        }
+        Expr::BinOp { op, left, right, .. } => {
+            if !(sym_len_term(left, binder, xs_param) && sym_len_term(right, binder, xs_param)) {
+                return None;
+            }
+            // Both sides are the same symbolic value: reflexivity decides.
+            match op.as_str() {
+                "<" | ">" | "!=" => Some(false),
+                "<=" | ">=" | "==" => Some(true),
+                _ => None,
+            }
+        }
+        Expr::UnaryOp { op, expr, .. } if op == "!" => {
+            Some(!pred_holds_for_sym_len(expr, binder, xs_param)?)
+        }
+        Expr::LitBool { value, .. } => Some(*value),
+        _ => None,
+    }
+}
+
+/// Does this predicate expression denote the symbolic value `len(xs_param)` —
+/// the refine binder itself (under the substitution) or the measure call?
+fn sym_len_term(expr: &Expr, binder: &str, xs_param: &str) -> bool {
+    match expr {
+        Expr::Name { name, .. } => name == binder,
+        Expr::Call { callee, args, .. } => {
+            matches!(callee.as_ref(), Expr::Name { name, .. } if name == "len")
+                && args.len() == 1
+                && matches!(&args[0], Expr::Name { name, .. } if name == xs_param)
+        }
+        _ => false,
+    }
 }
 
 /// [P2-REFINE2] Does a refinement predicate mention the `len(...)` measure?
@@ -2324,5 +2450,70 @@ fn main(console: Console) -> Unit uses {console} {
         );
         check_program_labels(&prog, &auth_seeds)
             .expect("authority atoms are not data; a ⊥-data bound must not fire");
+    }
+
+    #[test]
+    fn gapc1_rejects_len_of_same_list_as_index() {
+        // [GAPC1-SYM-LEN] SPEC REQ-REFINE-2's symbolic case (P2C honest
+        // limit): nth_c1(data, data.len()) substitutes k := len(xs), so
+        // `k < len(xs)` becomes `len(xs) < len(xs)` — decidably false with
+        // zero execution and no knowledge of the list's actual length.
+        let src = r#"
+fn nth_c1(xs: List<Int>, i: {k: Int | 0 <= k && k < len(xs)}) -> Int {
+    match xs.get(i) {
+        Some(v) => v,
+        None => 0,
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    let data: List<Int> = [10, 20, 30];
+    console.print(nth_c1(data, data.len()).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected GAPC1 symbolic reject");
+        assert!(err.0.contains("[GAPC1-SYM-LEN]"), "{err}");
+        assert!(err.0.contains("data.len()"), "{err}");
+    }
+
+    #[test]
+    fn gapc1_len_minus_one_and_other_list_stay_soft() {
+        // Negative controls: `a.len() - 1` is not the bare same-term shape
+        // (BinOp argument), and `b.len()` measures a DIFFERENT list — both
+        // stay soft -> prove / runtime, exactly the P2C design.
+        let src = r#"
+fn nth_c2(xs: List<Int>, i: {k: Int | 0 <= k && k < len(xs)}) -> Int {
+    match xs.get(i) {
+        Some(v) => v,
+        None => 0,
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1];
+    console.print(nth_c2(a, a.len() - 1).show());
+    console.print(nth_c2(a, b.len()).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("BinOp arg and other-list len must stay soft");
+    }
+
+    #[test]
+    fn gapc1_kleene_or_guard_stays_soft() {
+        // `k < 0 || k < len(xs)` under k := len(xs) is unknown || false ->
+        // unknown: the Kleene-|| guard keeps it soft (a full solver would
+        // reject; this slice honestly does not claim to be one).
+        let src = r#"
+fn pick_c3(xs: List<Int>, i: {k: Int | k < 0 || k < len(xs)}) -> Int {
+    0
+}
+fn main(console: Console) -> Unit uses {console} {
+    let data: List<Int> = [4, 5];
+    console.print(pick_c3(data, data.len()).show());
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("Kleene-|| guard must stay soft");
     }
 }
