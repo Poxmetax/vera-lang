@@ -166,7 +166,90 @@ fn encode_expr(expr: &Expr) -> Result<String, String> {
             Ok(format!("(ite {c} {t} {e})"))
         }
         Expr::Block(b) => encode_block(b),
+        // [GAPC2-SMT-LEN] The `len` measure as an OPAQUE Int constant: the
+        // pred form `len(xs)` and the method form `xs.len()` of the same list
+        // map to ONE symbol `vera_len_<xs>` (declared with the `>= 0` axiom by
+        // the discharge paths via `collect_len_syms`). Receivers/arguments
+        // must be plain `Name`s; every other Call shape stays unsupported.
+        // Soundness both ways: PROVED quantifies over all lengths c >= 0
+        // (over-approximation), and every model c >= 0 is realizable by an
+        // actual list of length c — so no fake PROVED and no spurious REFUTED.
+        Expr::Call { callee, args, .. } => match (callee.as_ref(), args.as_slice()) {
+            (Expr::Name { name, .. }, [Expr::Name { name: xs, .. }]) if name == "len" => {
+                Ok(len_sym(xs))
+            }
+            (Expr::FieldAccess { obj, field, .. }, []) if field == "len" => match obj.as_ref() {
+                Expr::Name { name: xs, .. } => Ok(len_sym(xs)),
+                _ => Err(".len() receiver must be a plain name in the SMT slice".into()),
+            },
+            _ => Err("unsupported expr kind for SMT slice".into()),
+        },
         _ => Err("unsupported expr kind for SMT slice".into()),
+    }
+}
+
+/// [GAPC2-SMT-LEN] SMT symbol for the opaque `len` measure of list `xs`.
+fn len_sym(xs: &str) -> String {
+    format!("vera_len_{}", sanitize_sym(xs))
+}
+
+/// [GAPC2-SMT-LEN] Collect the len-measure symbols an expression's encode may
+/// reference (both `len(xs)` and `xs.len()` forms), so each discharge path
+/// declares them exactly once with the `>= 0` axiom. Mirrors `encode_expr`
+/// coverage; shapes the encoder rejects contribute nothing here (their encode
+/// fails first and the obligation stays RUNTIME-CHECKED).
+fn collect_len_syms(expr: &Expr, out: &mut Vec<String>) {
+    match expr {
+        Expr::Call { callee, args, .. } => {
+            match (callee.as_ref(), args.as_slice()) {
+                (Expr::Name { name, .. }, [Expr::Name { name: xs, .. }]) if name == "len" => {
+                    let s = len_sym(xs);
+                    if !out.contains(&s) {
+                        out.push(s);
+                    }
+                }
+                (Expr::FieldAccess { obj, field, .. }, []) if field == "len" => {
+                    if let Expr::Name { name: xs, .. } = obj.as_ref() {
+                        let s = len_sym(xs);
+                        if !out.contains(&s) {
+                            out.push(s);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            for a in args {
+                collect_len_syms(a, out);
+            }
+        }
+        Expr::UnaryOp { expr, .. } => collect_len_syms(expr, out),
+        Expr::BinOp { left, right, .. } => {
+            collect_len_syms(left, out);
+            collect_len_syms(right, out);
+        }
+        Expr::IfExpr {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_len_syms(cond, out);
+            collect_len_syms_block(then_body, out);
+            collect_len_syms_block(else_body, out);
+        }
+        Expr::Block(b) => collect_len_syms_block(b, out),
+        _ => {}
+    }
+}
+
+fn collect_len_syms_block(block: &Block, out: &mut Vec<String>) {
+    for stmt in &block.stmts {
+        if let Stmt::Let { value, .. } = stmt {
+            collect_len_syms(value, out);
+        }
+    }
+    if let Some(r) = &block.result {
+        collect_len_syms(r, out);
     }
 }
 
@@ -297,7 +380,31 @@ fn discharge_goal(
         }
     }
 
+    // [GAPC2-SMT-LEN] declare every len-measure symbol this query's exprs can
+    // reference, once each, and assume the measure axiom `>= 0`. Len-free
+    // programs collect nothing, so their scripts stay byte-identical.
+    let mut len_syms = Vec::new();
+    for p in &fn_decl.params {
+        if let Type::Refine {
+            pred: Some(pred), ..
+        } = &p.ty
+        {
+            collect_len_syms(pred, &mut len_syms);
+        }
+    }
+    for req in &fn_decl.requires {
+        collect_len_syms(req, &mut len_syms);
+    }
+    collect_len_syms(goal, &mut len_syms);
+    collect_len_syms_block(&fn_decl.body, &mut len_syms);
+
     let mut assumptions = Vec::new();
+    for s in &len_syms {
+        if !decls.contains(s) {
+            decls.push(s.clone());
+        }
+        assumptions.push(format!("(assert (>= {s} 0))"));
+    }
     if let Err(reason) = assert_param_refines(fn_decl, &mut assumptions) {
         return Ok(Discharge::RuntimeChecked { reason });
     }
@@ -609,6 +716,14 @@ fn discharge_call_pred(
         Err(reason) => return Ok(Discharge::RuntimeChecked { reason }),
     };
     let mut s = String::from("(set-logic QF_LIA)\n");
+    // [GAPC2-SMT-LEN] len-measure symbols in the pred: declare + axiom.
+    // (Unreachable while [P2-SOUND2] keeps list args non-closed, but keeps
+    // the encode fail-safe honest if that gate ever widens.)
+    let mut len_syms = Vec::new();
+    collect_len_syms(pred, &mut len_syms);
+    for ls in &len_syms {
+        s.push_str(&format!("(declare-const {ls} Int)\n(assert (>= {ls} 0))\n"));
+    }
     for p in &callee.params {
         match &p.ty {
             Type::Int | Type::Refine { .. } => {
@@ -829,6 +944,117 @@ fn pos_id(x: {x: Int | x >= 1}) -> Int {
 fn main(console: Console) -> Unit uses {console} {
     let v: Int = 5;
     console.print(pos_id(v).show());
+}
+"#;
+        let prog = parse(src).unwrap();
+        check_program(&prog).unwrap();
+        let obs = prove_program(&prog).unwrap();
+        assert!(
+            obs.iter().any(|o| o.kind == "call_requires"
+                && matches!(o.status, Discharge::RuntimeChecked { .. })),
+            "{obs:?}"
+        );
+        assert!(
+            obs.iter()
+                .all(|o| !matches!(o.status, Discharge::Refuted { .. })),
+            "{obs:?}"
+        );
+    }
+
+    #[test]
+    fn gapc2_len_param_refine_assumption_enables_proved_ensures() {
+        // [GAPC2-SMT-LEN] a len-refined param used to kill the WHOLE fn-level
+        // obligation (the assumption's encode failed on `len` -> the ensures
+        // came back RUNTIME-CHECKED even though the goal is len-free). With
+        // len as an opaque measure constant the assumption is assertable:
+        // k = i, 0 <= k && k < vera_len_xs |- result >= 0 is unsat-negated.
+        let src = r#"
+fn pick_nonneg(xs: List<Int>, i: {k: Int | 0 <= k && k < len(xs)}) -> Int
+    ensures result >= 0
+{
+    i
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print("ok");
+}
+"#;
+        let prog = parse(src).unwrap();
+        check_program(&prog).unwrap();
+        let obs = prove_program(&prog).unwrap();
+        assert!(
+            obs.iter()
+                .any(|o| o.kind == "ensures" && matches!(o.status, Discharge::Proved)),
+            "{obs:?}"
+        );
+    }
+
+    #[test]
+    fn gapc2_len_body_nonneg_ensures_proved_by_axiom() {
+        // [GAPC2-SMT-LEN] the method form `xs.len()` in the BODY maps to the
+        // same opaque constant; the `>= 0` measure axiom alone discharges
+        // `ensures result >= 0`.
+        let src = r#"
+fn size_of(xs: List<Int>) -> Int
+    ensures result >= 0
+{
+    xs.len()
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print("ok");
+}
+"#;
+        let prog = parse(src).unwrap();
+        check_program(&prog).unwrap();
+        let obs = prove_program(&prog).unwrap();
+        assert!(
+            obs.iter()
+                .any(|o| o.kind == "ensures" && matches!(o.status, Discharge::Proved)),
+            "{obs:?}"
+        );
+    }
+
+    #[test]
+    fn gapc2_refutable_len_ensures_stays_honest() {
+        // [GAPC2-SMT-LEN] no fake PROVED: `result >= 1` over `xs.len()` is
+        // genuinely violable — the c = 0 model IS the empty list — so the
+        // obligation must come back REFUTED, never Proved.
+        let src = r#"
+fn size_pos(xs: List<Int>) -> Int
+    ensures result >= 1
+{
+    xs.len()
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print("ok");
+}
+"#;
+        let prog = parse(src).unwrap();
+        check_program(&prog).unwrap();
+        let obs = prove_program(&prog).unwrap();
+        assert!(
+            obs.iter()
+                .any(|o| o.kind == "ensures" && matches!(o.status, Discharge::Refuted { .. })),
+            "{obs:?}"
+        );
+        assert!(
+            obs.iter()
+                .all(|o| !matches!(o.status, Discharge::Proved)),
+            "{obs:?}"
+        );
+    }
+
+    #[test]
+    fn gapc2_call_site_len_args_stay_runtime_checked() {
+        // [GAPC2-SMT-LEN] honest limit pinned: a call site passing a list
+        // still fails the closed-literal gate ([P2-SOUND2]) — the measure
+        // encode must not widen call-site discharge.
+        let src = r#"
+fn pick2(xs: List<Int>, i: {k: Int | 0 <= k && k < len(xs)}) -> Int {
+    i
+}
+fn main(console: Console) -> Unit uses {console} {
+    let data: List<Int> = [1, 2];
+    console.print(pick2(data, 1).show());
 }
 "#;
         let prog = parse(src).unwrap();

@@ -235,10 +235,57 @@ impl Parser {
     fn parse_param(&mut self) -> Result<Param, ParseError> {
         let name = self.advance().text;
         self.expect(":")?;
-        Ok(Param {
-            name,
-            ty: self.parse_type()?,
-        })
+        let ty = self.parse_type()?;
+        // [GAP4-VALUE-LABEL] optional value-label postfix on the param type.
+        let label = self.parse_opt_label()?;
+        Ok(Param { name, ty, label })
+    }
+
+    /// [GAP4-VALUE-LABEL] Optional `^{atom, ...}` postfix after an annotation
+    /// type — param and let positions only (return / nested type positions
+    /// stay label-free this slice). Atoms: the two DATA atoms `untrusted` /
+    /// `secret`; authority stays on the `uses` clause. Canonicalized
+    /// (sorted + deduped) at parse so render round-trips byte-identically.
+    fn parse_opt_label(&mut self) -> Result<Vec<String>, ParseError> {
+        if !self.at(&["^"]) {
+            return Ok(Vec::new());
+        }
+        self.advance();
+        self.expect("{")?;
+        if self.at(&["}"]) {
+            let t = self.cur().clone();
+            return Err(ParseError {
+                message: "empty label set (write no `^{}` instead)".into(),
+                span: t.span,
+            });
+        }
+        let mut atoms: Vec<String> = Vec::new();
+        loop {
+            let t = self.advance();
+            match t.text.as_str() {
+                "untrusted" | "secret" => {
+                    if !atoms.contains(&t.text) {
+                        atoms.push(t.text.clone());
+                    }
+                }
+                other => {
+                    return Err(ParseError {
+                        message: format!(
+                            "unknown label atom {other:?} (this slice: untrusted, secret)"
+                        ),
+                        span: t.span,
+                    });
+                }
+            }
+            if self.at(&[","]) {
+                self.advance();
+                continue;
+            }
+            break;
+        }
+        self.expect("}")?;
+        atoms.sort();
+        Ok(atoms)
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
@@ -380,6 +427,13 @@ impl Parser {
         } else {
             None
         };
+        // [GAP4-VALUE-LABEL] optional value-label postfix, only after an
+        // explicit type annotation (`let x: Str^{secret} = ...`).
+        let label = if ty.is_some() {
+            self.parse_opt_label()?
+        } else {
+            Vec::new()
+        };
         self.expect("=")?;
         let value = self.parse_expr()?;
         self.expect(";")?;
@@ -388,6 +442,7 @@ impl Parser {
             ty,
             value,
             span: start,
+            label,
         })
     }
 

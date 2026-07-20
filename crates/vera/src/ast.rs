@@ -274,6 +274,9 @@ pub enum Stmt {
         value: Expr,
         #[serde(skip)]
         span: Span,
+        /// [GAP4-VALUE-LABEL] see `Param::label`.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        label: Vec<String>,
     },
     Expr {
         expr: Expr,
@@ -318,6 +321,12 @@ pub struct EnumDecl {
 pub struct Param {
     pub name: String,
     pub ty: Type,
+    /// [GAP4-VALUE-LABEL] Data-atom names from a `T^{...}` annotation
+    /// (parser-canonical: sorted + deduped; empty = unlabeled). Omitted from
+    /// the canonical serialization when empty, so unlabeled hashes are
+    /// byte-identical to pre-slice hashes.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub label: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

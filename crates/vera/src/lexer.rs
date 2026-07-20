@@ -184,7 +184,9 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
             continue;
         }
 
-        if "+-*/%<>=!?".contains(ch) {
+        // [GAP4-VALUE-LABEL] `^` lexes as a single-char op (SPEC: reserved for
+        // value labels `T^{...}`; this slice uses it at annotation positions).
+        if "+-*/%<>=!?^".contains(ch) {
             i += 1;
             col += 1;
             // `?ident` with no space → hole token (SPEC §3.2).
