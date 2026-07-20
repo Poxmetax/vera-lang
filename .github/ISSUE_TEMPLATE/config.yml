@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Known gaps
+    url: https://github.com/Poxmetax/vera-lang/blob/main/docs/pilot/KNOWN_GAPS.md
+    about: Check documented research gaps before filing a feature or bug report.
+  - name: Security advisories
+    url: https://github.com/Poxmetax/vera-lang/security/advisories/new
+    about: Prefer private disclosure for security-sensitive reports (see SECURITY.md).

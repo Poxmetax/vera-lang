@@ -68,6 +68,8 @@ More examples: [`examples/README.md`](examples/README.md)
 
 ## Contributing
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security reports: [`SECURITY.md`](SECURITY.md).
+
 Research-stage contributions welcome via [GitHub Issues](https://github.com/Poxmetax/vera-lang/issues) and PRs.
 
 1. Prefer small, well-scoped changes with tests (`cargo test -p vera`).
