@@ -1,0 +1,19 @@
+﻿// Bench fixture — unfilled typed hole (NOT under examples/).
+// Agent must fill ?body then typecheck+run. No synthesis claim.
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int
+    requires lo <= hi
+{
+    if x < lo {
+        lo
+    } else {
+        if x > hi {
+            hi
+        } else {
+            x
+        }
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(clamp(5, 0, 10).show());
+}
