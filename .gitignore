@@ -1,6 +1,9 @@
 /target/
 **/*.rs.bk
+**/*.bak_*
 _probe/
+_operator_archive/crate_src_bak/
+_operator_archive/docs_bak/
 docs/pilot/.pytest_cache/
 docs/pilot/.hypothesis/
 docs/pilot/.mypy_cache/
