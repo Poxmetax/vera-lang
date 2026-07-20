@@ -3,6 +3,7 @@
 use crate::ast::*;
 use crate::vc::ProvedSet;
 use std::collections::HashMap;
+use std::rc::Rc;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -34,7 +35,10 @@ pub enum Value {
     Closure {
         params: Vec<String>,
         body: Block,
-        captured: HashMap<String, Value>,
+        // [R3-RC-CAPTURE] Shared, ref-counted capture: cloning a closure is O(1)
+        // instead of a deep HashMap copy, so sequential lambda bindings no longer
+        // compound multiplicatively (linear source was O(2^n) time+memory).
+        captured: Rc<HashMap<String, Value>>,
     },
     /// Internal: `?` propagation bubbling `None` / `Err` out of the current call.
     EarlyReturn(Box<Value>),
@@ -302,7 +306,8 @@ impl<'a> Interpreter<'a> {
             Expr::Lambda { params, body, .. } => Ok(Value::Closure {
                 params: params.iter().map(|(n, _)| n.clone()).collect(),
                 body: body.clone(),
-                captured: env.values.clone(),
+                // [R3-RC-CAPTURE] wrap once; downstream closure clones share it.
+                captured: Rc::new(env.values.clone()),
             }),
             Expr::UnaryOp { op, expr, .. } => {
                 let v = self.eval_expr(expr, env)?;

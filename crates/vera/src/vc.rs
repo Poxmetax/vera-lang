@@ -116,7 +116,7 @@ fn encode_expr(expr: &Expr) -> Result<String, String> {
         } else {
             "false".into()
         }),
-        Expr::Name { name, .. } => Ok(sanitize_sym(name)),
+        Expr::Name { name, .. } => sanitize_sym(name),
         Expr::UnaryOp { op, expr, .. } => {
             let e = encode_expr(expr)?;
             match op.as_str() {
@@ -189,8 +189,11 @@ fn encode_expr(expr: &Expr) -> Result<String, String> {
 }
 
 /// [GAPC2-SMT-LEN] SMT symbol for the opaque `len` measure of list `xs`.
+/// [R1-SMT-INJECT] `xs` is always an `Expr::Name` (parser builds those only
+/// from `Ident` tokens), so it is already charset-safe and is emitted bare;
+/// the reject gate lives at the binder sites where illegal names can enter.
 fn len_sym(xs: &str) -> String {
-    format!("vera_len_{}", sanitize_sym(xs))
+    format!("vera_len_{}", xs)
 }
 
 /// [GAPC2-SMT-LEN] Collect the len-measure symbols an expression's encode may
@@ -265,7 +268,7 @@ fn encode_block(block: &Block) -> Result<String, String> {
             Stmt::Let { name, value, .. } => {
                 let v = encode_expr(value)?;
                 let body = go(&stmts[1..], result)?;
-                Ok(format!("(let (({} {v})) {body})", sanitize_sym(name)))
+                Ok(format!("(let (({} {v})) {body})", sanitize_sym(name)?))
             }
             Stmt::Expr { .. } => Err("statement expr in block not supported in SMT slice".into()),
         }
@@ -273,23 +276,38 @@ fn encode_block(block: &Block) -> Result<String, String> {
     go(&block.stmts, &block.result)
 }
 
-fn sanitize_sym(name: &str) -> String {
-    if name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
-        name.to_string()
+/// [R1-SMT-INJECT] An emit-safe name matches the SMT-LIB simple-symbol charset
+/// `^[A-Za-z_][A-Za-z0-9_]*$`, identical to the lexer's identifier rule
+/// (`lexer.rs`). Any other text (e.g. a `|`-bearing string-token binder) could
+/// break out of a quoted symbol.
+fn is_valid_sym(name: &str) -> bool {
+    let mut cs = name.chars();
+    match cs.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    cs.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// [R1-SMT-INJECT] Fail-closed: a binder name that is not an SMT-safe
+/// identifier yields `Err`, which every discharge path turns into
+/// `Discharge::RuntimeChecked` — never a forged `Proved`. We REJECT rather
+/// than escape `|`, because an embedded `|`/`\` in a quoted symbol is exactly
+/// the injection vector.
+fn sanitize_sym(name: &str) -> Result<String, String> {
+    if is_valid_sym(name) {
+        Ok(name.to_string())
     } else {
-        format!("|{name}|")
+        Err("binder name is not an SMT-safe identifier".to_string())
     }
 }
 
-fn collect_int_params(fn_decl: &FnDecl) -> Vec<String> {
+fn collect_int_params(fn_decl: &FnDecl) -> Result<Vec<String>, String> {
     let mut names = Vec::new();
     for p in &fn_decl.params {
         match &p.ty {
             Type::Int | Type::Refine { .. } => {
-                let n = sanitize_sym(&p.name);
+                let n = sanitize_sym(&p.name)?;
                 if !names.contains(&n) {
                     names.push(n);
                 }
@@ -297,13 +315,13 @@ fn collect_int_params(fn_decl: &FnDecl) -> Vec<String> {
             _ => {}
         }
         if let Type::Refine { name, .. } = &p.ty {
-            let bn = sanitize_sym(name);
+            let bn = sanitize_sym(name)?;
             if !names.contains(&bn) {
                 names.push(bn);
             }
         }
     }
-    names
+    Ok(names)
 }
 
 fn assert_param_refines(fn_decl: &FnDecl, lines: &mut Vec<String>) -> Result<(), String> {
@@ -315,8 +333,8 @@ fn assert_param_refines(fn_decl: &FnDecl, lines: &mut Vec<String>) -> Result<(),
         {
             lines.push(format!(
                 "(assert (= {} {}))",
-                sanitize_sym(name),
-                sanitize_sym(&p.name)
+                sanitize_sym(name)?,
+                sanitize_sym(&p.name)?
             ));
             let pe = encode_expr(pred)?;
             lines.push(format!("(assert {pe})"));
@@ -365,7 +383,12 @@ fn discharge_goal(
     goal: &Expr,
     extra_decls: &[String],
 ) -> Result<Discharge, VcError> {
-    let mut decls = collect_int_params(fn_decl);
+    // [R1-SMT-INJECT] fail-closed: an illegal binder name aborts the encode to
+    // RuntimeChecked rather than emitting a forgeable declaration.
+    let mut decls = match collect_int_params(fn_decl) {
+        Ok(d) => d,
+        Err(reason) => return Ok(Discharge::RuntimeChecked { reason }),
+    };
     for e in extra_decls {
         if !decls.contains(e) {
             decls.push(e.clone());
@@ -484,17 +507,26 @@ fn prove_fn(fn_decl: &FnDecl, out: &mut Vec<Obligation>) {
         pred: Some(pred),
     } = &fn_decl.ret
     {
-        let aliases = vec![sanitize_sym(name)];
-        let status = discharge_goal(
-            fn_decl,
-            &result_term,
-            &aliases,
-            pred,
-            &[sanitize_sym(name)],
-        )
-        .unwrap_or_else(|e| Discharge::RuntimeChecked {
-            reason: e.to_string(),
-        });
+        // [R1-SMT-INJECT] fail-closed on an illegal return-refine binder name.
+        let alias = match sanitize_sym(name) {
+            Ok(a) => a,
+            Err(reason) => {
+                out.push(Obligation {
+                    target: format!("{} return refine {{{name}: Int | …}}", fn_decl.name),
+                    kind: "return_refine".into(),
+                    status: Discharge::RuntimeChecked { reason },
+                    span: Some(fn_decl.span),
+                    fn_name: Some(fn_decl.name.clone()),
+                    ensures_index: None,
+                });
+                return;
+            }
+        };
+        let aliases = vec![alias.clone()];
+        let status = discharge_goal(fn_decl, &result_term, &aliases, pred, &[alias])
+            .unwrap_or_else(|e| Discharge::RuntimeChecked {
+                reason: e.to_string(),
+            });
         out.push(Obligation {
             target: format!("{} return refine {{{name}: Int | …}}", fn_decl.name),
             kind: "return_refine".into(),
@@ -724,39 +756,41 @@ fn discharge_call_pred(
     for ls in &len_syms {
         s.push_str(&format!("(declare-const {ls} Int)\n(assert (>= {ls} 0))\n"));
     }
+    // [R1-SMT-INJECT] fail-closed: any binder name that is not an SMT-safe
+    // identifier degrades this call obligation to RuntimeChecked rather than
+    // emitting a forgeable script. Validated names are emitted bare below.
+    for p in &callee.params {
+        if let Err(reason) = sanitize_sym(&p.name) {
+            return Ok(Discharge::RuntimeChecked { reason });
+        }
+        if let Type::Refine { name, .. } = &p.ty {
+            if let Err(reason) = sanitize_sym(name) {
+                return Ok(Discharge::RuntimeChecked { reason });
+            }
+        }
+    }
     for p in &callee.params {
         match &p.ty {
             Type::Int | Type::Refine { .. } => {
-                s.push_str(&format!(
-                    "(declare-const {} Int)\n",
-                    sanitize_sym(&p.name)
-                ));
+                s.push_str(&format!("(declare-const {} Int)\n", p.name));
             }
             _ => {}
         }
         if let Type::Refine { name, .. } = &p.ty {
-            let bn = sanitize_sym(name);
-            if bn != sanitize_sym(&p.name) {
-                s.push_str(&format!("(declare-const {bn} Int)\n"));
+            if name != &p.name {
+                s.push_str(&format!("(declare-const {name} Int)\n"));
             }
         }
     }
     for (p, a) in callee.params.iter().zip(arg_smt.iter()) {
         match &p.ty {
             Type::Int | Type::Refine { .. } => {
-                s.push_str(&format!(
-                    "(assert (= {} {a}))\n",
-                    sanitize_sym(&p.name)
-                ));
+                s.push_str(&format!("(assert (= {} {a}))\n", p.name));
             }
             _ => {}
         }
         if let Type::Refine { name, .. } = &p.ty {
-            s.push_str(&format!(
-                "(assert (= {} {}))\n",
-                sanitize_sym(name),
-                sanitize_sym(&p.name)
-            ));
+            s.push_str(&format!("(assert (= {} {}))\n", name, p.name));
         }
     }
     s.push_str(&format!("(assert (not {pred_smt}))\n(check-sat)\n"));
@@ -851,6 +885,41 @@ pub fn format_report(path: &str, obligations: &[Obligation]) -> String {
 mod tests {
     use super::*;
     use crate::{check_program, parse};
+
+    #[test]
+    fn r1_str_token_binder_rejected_at_parse() {
+        // [R1-SMT-INJECT] a non-identifier (string-token) binder name must fail
+        // to parse, so it can never reach the SMT encoder. Minimal repro — a
+        // pipe-bearing name — not full SMT spam.
+        let illegal = r#"fn f("a|b": Int) -> Int { 0 }"#;
+        assert!(parse(illegal).is_err(), "illegal binder name must be rejected");
+        // the legal analogue still parses (no over-restriction).
+        let legal = r#"fn f(ab: Int) -> Int { 0 }"#;
+        assert!(parse(legal).is_ok(), "a plain identifier binder must still parse");
+    }
+
+    #[test]
+    fn r1_sanitize_sym_rejects_non_ident() {
+        // [R1-SMT-INJECT] encoder-layer backstop: only charset-safe identifiers
+        // are emitted; anything else is Err (→ RuntimeChecked), never escaped.
+        assert!(sanitize_sym("ok_name1").is_ok());
+        assert!(sanitize_sym("_x").is_ok());
+        assert!(sanitize_sym("a|b").is_err());
+        assert!(sanitize_sym("a b").is_err());
+        assert!(sanitize_sym("").is_err());
+        assert!(sanitize_sym("1abc").is_err());
+    }
+
+    #[test]
+    fn r2_deep_nesting_is_parse_error_not_overflow() {
+        // [R2-DEPTH] a deeply nested expression returns a clean ParseError above
+        // the depth ceiling (MAX_PARSE_DEPTH = 256) instead of overflowing the
+        // native stack. 512 unary ops is comfortably over the ceiling.
+        let deep = format!("fn f() -> Int {{ {}1 }}", "-".repeat(512));
+        assert!(parse(&deep).is_err(), "over-deep nesting must be a ParseError");
+        let shallow = format!("fn f() -> Int {{ {}1 }}", "-".repeat(8));
+        assert!(parse(&shallow).is_ok(), "modest nesting must still parse");
+    }
 
     #[test]
     fn gap5_inv2_key_distinguishes_toolchains() {

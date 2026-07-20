@@ -20,9 +20,16 @@ impl From<LexError> for ParseError {
     }
 }
 
+/// [R2-DEPTH] Ceiling on nested recursive descent (expr / type / unary),
+/// chosen well below the native-stack overflow threshold yet far above any
+/// realistic program's nesting.
+const MAX_PARSE_DEPTH: usize = 256;
+
 struct Parser {
     tokens: Vec<Token>,
     i: usize,
+    /// [R2-DEPTH] current recursion depth, guarded by `enter_depth`.
+    depth: usize,
 }
 
 impl Parser {
@@ -55,6 +62,39 @@ impl Parser {
             });
         }
         Ok(self.advance())
+    }
+
+    /// [R1-SMT-INJECT] Binder names (param / let / refine / lambda param) must be
+    /// charset-safe identifiers so they cannot smuggle SMT-LIB metacharacters
+    /// into the `--prove` encoder. Accept `Ident` / `TypeIdent` (both lexed from
+    /// `[A-Za-z_][A-Za-z0-9_]*`); reject `Str` and every other token kind. This
+    /// is the parser-layer half of the fail-closed fix; `vc::sanitize_sym` is the
+    /// encoder-layer backstop.
+    fn expect_binder_name(&mut self) -> Result<Token, ParseError> {
+        let t = self.cur().clone();
+        if !matches!(t.kind, TokKind::Ident | TokKind::TypeIdent) {
+            return Err(ParseError {
+                message: format!("expected an identifier binder name, got {:?}", t.text),
+                span: t.span,
+            });
+        }
+        Ok(self.advance())
+    }
+
+    /// [R2-DEPTH] Bounded-recursion guard shared by `parse_expr` / `parse_unary`
+    /// / `parse_type`. A crafted deeply-nested input would otherwise overflow the
+    /// native stack (an uncatchable abort); above the ceiling we return a clean
+    /// `ParseError`. Each guarded entry decrements on the way out.
+    fn enter_depth(&mut self) -> Result<(), ParseError> {
+        self.depth += 1;
+        if self.depth > MAX_PARSE_DEPTH {
+            self.depth -= 1;
+            return Err(ParseError {
+                message: "nesting depth exceeds parser limit".into(),
+                span: self.cur().span,
+            });
+        }
+        Ok(())
     }
 
     fn parse_program(&mut self) -> Result<Program, ParseError> {
@@ -233,7 +273,7 @@ impl Parser {
     }
 
     fn parse_param(&mut self) -> Result<Param, ParseError> {
-        let name = self.advance().text;
+        let name = self.expect_binder_name()?.text;
         self.expect(":")?;
         let ty = self.parse_type()?;
         // [GAP4-VALUE-LABEL] optional value-label postfix on the param type.
@@ -289,6 +329,13 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
+        self.enter_depth()?;
+        let out = self.parse_type_inner();
+        self.depth -= 1;
+        out
+    }
+
+    fn parse_type_inner(&mut self) -> Result<Type, ParseError> {
         let t = self.cur().clone();
         match t.text.as_str() {
             "Int" => {
@@ -363,7 +410,7 @@ impl Parser {
             }
             "{" => {
                 self.advance();
-                let name = self.advance().text;
+                let name = self.expect_binder_name()?.text;
                 self.expect(":")?;
                 self.expect("Int")?;
                 self.expect("|")?;
@@ -420,7 +467,7 @@ impl Parser {
 
     fn parse_let(&mut self) -> Result<Stmt, ParseError> {
         let start = self.expect("let")?.span;
-        let name = self.advance().text;
+        let name = self.expect_binder_name()?.text;
         let ty = if self.at(&[":"]) {
             self.advance();
             Some(self.parse_type()?)
@@ -447,6 +494,13 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        self.enter_depth()?;
+        let out = self.parse_expr_inner();
+        self.depth -= 1;
+        out
+    }
+
+    fn parse_expr_inner(&mut self) -> Result<Expr, ParseError> {
         if self.at(&["match"]) {
             return self.parse_match();
         }
@@ -466,7 +520,7 @@ impl Parser {
         let mut params = Vec::new();
         if !self.at(&[")"]) {
             loop {
-                let name = self.advance().text;
+                let name = self.expect_binder_name()?.text;
                 let ty = if self.at(&[":"]) {
                     self.advance();
                     Some(self.parse_type()?)
@@ -725,6 +779,13 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        self.enter_depth()?;
+        let out = self.parse_unary_inner();
+        self.depth -= 1;
+        out
+    }
+
+    fn parse_unary_inner(&mut self) -> Result<Expr, ParseError> {
         if self.at(&["-", "!"]) {
             let op_tok = self.advance();
             let expr = self.parse_unary()?;
@@ -1012,7 +1073,11 @@ impl Parser {
 
 pub fn parse(source: &str) -> Result<Program, ParseError> {
     let tokens = lex(source)?;
-    let mut p = Parser { tokens, i: 0 };
+    let mut p = Parser {
+        tokens,
+        i: 0,
+        depth: 0,
+    };
     let prog = p.parse_program()?;
     if !p.at_kind(TokKind::Eof) {
         return Err(ParseError {
