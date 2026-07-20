@@ -19,18 +19,21 @@
 | GAP-5 | INV-2 design | **DESIGNED** `23f2e46` `[GAP5-INV2]` / [`GAP5_INV2_DESIGN_NOTE.md`](GAP5_INV2_DESIGN_NOTE.md); no durable store (GAP-D2) |
 | **GAP4-R2-SURFACE** | Thin label typecheck surface (post-E) | **CLOSED** `[GAP4-R2-SURFACE]` commit `658e14b` (publish merge `34d7459`) -- SoT [`GAP4_R2_SURFACE_SLICE.md`](GAP4_R2_SURFACE_SLICE.md); soft ACK [`CURSOR_SYNC_ACK_GAP4_SURFACE.md`](CURSOR_SYNC_ACK_GAP4_SURFACE.md); seeded E1/E6 rejects in typecheck; **not** full IFC / no label syntax or inference |
 | **GAP-C1** | Symbolic same-term `len`-as-index reject | **CLOSED** `[GAPC1-SYM-LEN]` commit `4fbf7df` (publish merge `0bc3c22`) -- SoT [`GAPC1_SYM_LEN_SLICE.md`](GAPC1_SYM_LEN_SLICE.md); soft ACK [`CURSOR_SYNC_ACK_GAPC1.md`](CURSOR_SYNC_ACK_GAPC1.md); soft review PASS [`CLAUDE_REVIEW_GAPC1_SYM_LEN.md`](CLAUDE_REVIEW_GAPC1_SYM_LEN.md); same-term fragment only; soft cases = design |
+| **GAP-C2** | SMT `len` measure encode (prove-tier) | **PREPARED** Madis-gated -- pointer [`CLAUDE_POINTER_GAPC2_IMPLEMENT.md`](CLAUDE_POINTER_GAPC2_IMPLEMENT.md); brief [`FABLE5_GAPC2_HANDOFF_PROMPT.md`](FABLE5_GAPC2_HANDOFF_PROMPT.md); marker `[GAPC2-SMT-LEN]`; do not auto-start |
+| **GAP4-VALUE-LABEL** | Minimal value-label syntax → GAP4 surface | **PREPARED** Madis-gated -- pointer [`CLAUDE_POINTER_GAP4_VALUE_LABEL_IMPLEMENT.md`](CLAUDE_POINTER_GAP4_VALUE_LABEL_IMPLEMENT.md); brief [`FABLE5_GAP4_VALUE_LABEL_HANDOFF_PROMPT.md`](FABLE5_GAP4_VALUE_LABEL_HANDOFF_PROMPT.md); marker `[GAP4-VALUE-LABEL]`; surface ≠ IFC; R2 gate stays OPEN; do not auto-start |
 
 Handoff (A-E overview): [FABLE5_CONF_P2_HANDOFF_PROMPT.md](FABLE5_CONF_P2_HANDOFF_PROMPT.md).
-**E / GAP4 surface / GAP-C1 closed.** Remaining OPEN = R2 ergonomics / value-label syntax / GAP-C2 SMT `len` encode (all Madis-gated). **Paste POINTER files to Claude, not full handoffs.**
+**E / GAP4 surface / GAP-C1 closed.** Remaining OPEN = R2 ergonomics / value-label syntax / GAP-C2 SMT `len` encode (all Madis-gated). **Both implement briefs prepared** — soft does **not** auto-pick which Fable runs first. **Paste POINTER files to Claude, not full handoffs.**
 
-### Next recommended
+### Next recommended (Madis-gated — both prepared)
 
 | Field | Value |
 |-------|-------|
-| **Default next hard task** | **TBD Madis-gated** — soft does **not** pick |
-| **Candidates (do not auto-start)** | GAP-C2 (SMT `len` encode) **or** value-label / thin R2 ergonomics probe |
-| **Gate** | Madis chooses and pastes implement pointer |
-| **Not default** | F6 polish; GAP-D2 (only if durable wanted) |
+| **Default next hard task** | **TBD Madis-gated** — soft does **not** pick which runs first |
+| **Candidate A** | **GAP-C2** — SMT `len` measure encode (prove-tier) — pointer [`CLAUDE_POINTER_GAPC2_IMPLEMENT.md`](CLAUDE_POINTER_GAPC2_IMPLEMENT.md); brief [`FABLE5_GAPC2_HANDOFF_PROMPT.md`](FABLE5_GAPC2_HANDOFF_PROMPT.md); marker `[GAPC2-SMT-LEN]` |
+| **Candidate B** | **GAP4-VALUE-LABEL** — minimal value-label syntax feeding GAP4-R2-SURFACE (not R2 ergonomics gate; not full IFC) — pointer [`CLAUDE_POINTER_GAP4_VALUE_LABEL_IMPLEMENT.md`](CLAUDE_POINTER_GAP4_VALUE_LABEL_IMPLEMENT.md); brief [`FABLE5_GAP4_VALUE_LABEL_HANDOFF_PROMPT.md`](FABLE5_GAP4_VALUE_LABEL_HANDOFF_PROMPT.md); marker `[GAP4-VALUE-LABEL]` |
+| **Not these by default** | GAP4-R2-ERGO alone (measurement probe later); F6 polish; GAP-D2 (only if durable wanted) |
+| **Gate** | Madis chooses **one** and pastes that implement pointer |
 
 **Task C implement (historical):** paste [CLAUDE_POINTER_P2C_IMPLEMENT.md](CLAUDE_POINTER_P2C_IMPLEMENT.md). Full brief: [FABLE5_CONF_P2C_HANDOFF_PROMPT.md](FABLE5_CONF_P2C_HANDOFF_PROMPT.md).
 **Sync ACK (Cursor):** [CURSOR_SYNC_ACK_GAPC1.md](CURSOR_SYNC_ACK_GAPC1.md) (GAP-C1 CLOSED soft re-verify PASS, baseline **59**, `4fbf7df` / `0bc3c22`); prior [CURSOR_SYNC_ACK_GAP4_SURFACE.md](CURSOR_SYNC_ACK_GAP4_SURFACE.md) (`658e14b` / `34d7459`); [CURSOR_SYNC_ACK_P2E.md](CURSOR_SYNC_ACK_P2E.md) (`ddc3d6a` / `3c72ce4`); [CURSOR_SYNC_ACK_GAPS_BEFORE_E.md](CURSOR_SYNC_ACK_GAPS_BEFORE_E.md) / [CURSOR_SYNC_ACK_GAP2.md](CURSOR_SYNC_ACK_GAP2.md). Soft frozen on Fable files.
@@ -75,4 +78,4 @@ cargo run -p vera -- --prove examples/prove_refuted.vera
 
 ## Soft track status (post-freeze)
 
-**ACTIVE (post-freeze, no-rename rule).** Expect **59** tests. Task E **CLOSED** `[P2E-FIX]` (`ddc3d6a` / `3c72ce4`). **GAP4-R2-SURFACE CLOSED** (`658e14b` / `34d7459`). **GAP-C1 CLOSED** `[GAPC1-SYM-LEN]` (`4fbf7df` / `0bc3c22`) — SoT [GAPC1_SYM_LEN_SLICE.md](GAPC1_SYM_LEN_SLICE.md); ACK [CURSOR_SYNC_ACK_GAPC1.md](CURSOR_SYNC_ACK_GAPC1.md); soft review PASS [CLAUDE_REVIEW_GAPC1_SYM_LEN.md](CLAUDE_REVIEW_GAPC1_SYM_LEN.md). **Next recommended = TBD Madis-gated** (GAP-C2 or value-label — soft does not pick). Do not soft-steal label/typecheck/diag; do not open GAP-D2 unless Madis switches. Debt: [KNOWN_GAPS.md](KNOWN_GAPS.md). Commit gate: [COMMIT_CHECKLIST.md](COMMIT_CHECKLIST.md).
+**ACTIVE (post-freeze, no-rename rule).** Expect **59** tests. Task E **CLOSED** `[P2E-FIX]` (`ddc3d6a` / `3c72ce4`). **GAP4-R2-SURFACE CLOSED** (`658e14b` / `34d7459`). **GAP-C1 CLOSED** `[GAPC1-SYM-LEN]` (`4fbf7df` / `0bc3c22`) — SoT [GAPC1_SYM_LEN_SLICE.md](GAPC1_SYM_LEN_SLICE.md); ACK [CURSOR_SYNC_ACK_GAPC1.md](CURSOR_SYNC_ACK_GAPC1.md); soft review PASS [CLAUDE_REVIEW_GAPC1_SYM_LEN.md](CLAUDE_REVIEW_GAPC1_SYM_LEN.md). **Next = TBD Madis-gated** — both briefs prepared: GAP-C2 (`CLAUDE_POINTER_GAPC2_IMPLEMENT.md`) **or** GAP4-VALUE-LABEL (`CLAUDE_POINTER_GAP4_VALUE_LABEL_IMPLEMENT.md`); soft does **not** pick which Fable runs first. Do not soft-steal label/typecheck/diag/vc/smt; do not open GAP-D2 unless Madis switches. Debt: [KNOWN_GAPS.md](KNOWN_GAPS.md). Commit gate: [COMMIT_CHECKLIST.md](COMMIT_CHECKLIST.md).

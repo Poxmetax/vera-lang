@@ -106,11 +106,12 @@ pub fn check_program(program: &Program) -> Result<(), TypeError> {
     for fn_decl in &program.functions {
         check_fn(fn_decl, &fns, &adt)?;
     }
-    // [GAP4-R2-SURFACE] Front-door label pass with EMPTY seeds — inert by the
-    // lattice laws (every label is ⊥, and ⊥ ⊑ ⊥ always holds), so no
-    // well-typed program changes verdict; the seeded entry point is the
-    // demonstrable surface.
-    check_program_labels(program, &HashMap::new())
+    // [GAP4-R2-SURFACE] Front-door label pass. [GAP4-VALUE-LABEL] the seeds
+    // now come from parsed `T^{...}` annotations (param / let positions);
+    // an annotation-free program harvests an EMPTY map, which is inert by
+    // the lattice laws (every label is ⊥, and ⊥ ⊑ ⊥ always holds) — so no
+    // pre-slice program changes verdict.
+    check_program_labels(program, &collect_label_seeds(program))
 }
 
 fn check_fn(
@@ -177,7 +178,7 @@ fn check_block(block: &Block, env: &Env<'_>) -> Result<Type, TypeError> {
     for stmt in &block.stmts {
         match stmt {
             Stmt::Let {
-                name, ty, value, span
+                name, ty, value, span, ..
             } => {
                 let vty = infer_expr(
                     value,
@@ -1672,11 +1673,138 @@ fn check_pattern(
 // flows.
 // ---------------------------------------------------------------------------
 
+/// [GAP4-VALUE-LABEL] Harvest label seeds from parsed annotations: fn params
+/// and (arbitrarily nested) let bindings carrying a `T^{...}` postfix become
+/// `(fn name, binding name) -> Label` entries for the existing
+/// `[GAP4-R2-SURFACE]` pass. The annotation IS the seed — the walker and
+/// both enforcement points are unchanged. Atom names arrive parser-validated
+/// (`untrusted` / `secret` only); anything else is defensively skipped, never
+/// fabricated into a label.
+pub fn collect_label_seeds(program: &Program) -> HashMap<(String, String), Label> {
+    let mut seeds = HashMap::new();
+    for f in &program.functions {
+        for p in &f.params {
+            insert_label_seed(&mut seeds, &f.name, &p.name, &p.label);
+        }
+        collect_block_label_seeds(&f.body, &f.name, &mut seeds);
+    }
+    seeds
+}
+
+fn insert_label_seed(
+    seeds: &mut HashMap<(String, String), Label>,
+    fn_name: &str,
+    binding: &str,
+    atoms: &[String],
+) {
+    let mapped: Vec<Atom> = atoms
+        .iter()
+        .filter_map(|a| match a.as_str() {
+            "untrusted" => Some(Atom::Untrusted),
+            "secret" => Some(Atom::Secret),
+            _ => None,
+        })
+        .collect();
+    if mapped.is_empty() {
+        return;
+    }
+    seeds.insert(
+        (fn_name.to_string(), binding.to_string()),
+        Label::of(&mapped),
+    );
+}
+
+fn collect_block_label_seeds(
+    block: &Block,
+    fn_name: &str,
+    seeds: &mut HashMap<(String, String), Label>,
+) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let {
+                name, value, label, ..
+            } => {
+                insert_label_seed(seeds, fn_name, name, label);
+                collect_expr_label_seeds(value, fn_name, seeds);
+            }
+            Stmt::Expr { expr, .. } => collect_expr_label_seeds(expr, fn_name, seeds),
+        }
+    }
+    if let Some(res) = &block.result {
+        collect_expr_label_seeds(res, fn_name, seeds);
+    }
+}
+
+fn collect_expr_label_seeds(
+    expr: &Expr,
+    fn_name: &str,
+    seeds: &mut HashMap<(String, String), Label>,
+) {
+    match expr {
+        Expr::Call { callee, args, .. } => {
+            collect_expr_label_seeds(callee, fn_name, seeds);
+            for a in args {
+                collect_expr_label_seeds(a, fn_name, seeds);
+            }
+        }
+        Expr::BinOp { left, right, .. } => {
+            collect_expr_label_seeds(left, fn_name, seeds);
+            collect_expr_label_seeds(right, fn_name, seeds);
+        }
+        Expr::UnaryOp { expr: e, .. } | Expr::Propagate { expr: e, .. } => {
+            collect_expr_label_seeds(e, fn_name, seeds)
+        }
+        Expr::FieldAccess { obj, .. } => collect_expr_label_seeds(obj, fn_name, seeds),
+        Expr::Ctor { args, .. } => {
+            for a in args {
+                collect_expr_label_seeds(a, fn_name, seeds);
+            }
+        }
+        Expr::StructLit { fields, .. } => {
+            for (_, e) in fields {
+                collect_expr_label_seeds(e, fn_name, seeds);
+            }
+        }
+        Expr::ListLit { elems, .. } => {
+            for e in elems {
+                collect_expr_label_seeds(e, fn_name, seeds);
+            }
+        }
+        Expr::Lambda { body, .. } => collect_block_label_seeds(body, fn_name, seeds),
+        Expr::IfExpr {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_expr_label_seeds(cond, fn_name, seeds);
+            collect_block_label_seeds(then_body, fn_name, seeds);
+            collect_block_label_seeds(else_body, fn_name, seeds);
+        }
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
+            collect_expr_label_seeds(scrutinee, fn_name, seeds);
+            for arm in arms {
+                collect_expr_label_seeds(&arm.body, fn_name, seeds);
+            }
+        }
+        Expr::Block(b) => collect_block_label_seeds(b, fn_name, seeds),
+        Expr::LitInt { .. }
+        | Expr::LitStr { .. }
+        | Expr::LitBool { .. }
+        | Expr::LitUnit { .. }
+        | Expr::Name { .. }
+        | Expr::Hole { .. } => {}
+    }
+}
+
 /// [GAP4-R2-SURFACE] Seeded label pass. Run it after `check_program` (or on
 /// an otherwise well-typed program): the walk assumes `.print` field-calls
 /// are `Console.print` — the only field-call sink in the MVP surface — and
-/// re-runs no other check. `check_program` itself calls this with empty
-/// seeds, which is inert by the lattice laws.
+/// re-runs no other check. `check_program` itself feeds this with seeds
+/// harvested from `T^{...}` annotations ([GAP4-VALUE-LABEL]); an
+/// annotation-free program yields empty seeds, inert by the lattice laws.
 pub fn check_program_labels(
     program: &Program,
     seeds: &HashMap<(String, String), Label>,
@@ -2515,5 +2643,139 @@ fn main(console: Console) -> Unit uses {console} {
 "#;
         let prog = parse(src).expect("parse");
         check_program(&prog).expect("Kleene-|| guard must stay soft");
+    }
+
+    #[test]
+    fn gap4vl_rejects_untrusted_let_arg_from_plain_source() {
+        // [GAP4-VALUE-LABEL] the milestone: an E1-shaped reject with NO test
+        // seeds — the `^{untrusted}` annotation alone feeds the existing
+        // [GAP4-R2-SURFACE] pass through the plain front door.
+        let src = r#"
+fn store_row2(row: Str) -> Unit {
+    row;
+}
+fn main(console: Console) -> Unit uses {console} {
+    let user_input: Str^{untrusted} = "row";
+    store_row2(user_input);
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected E1 reject from source");
+        assert!(err.0.contains("[GAP4-R2-SURFACE]"), "{err}");
+        assert!(err.0.contains("{untrusted}"), "{err}");
+        assert!(err.0.contains("parameter 'row' of store_row2"), "{err}");
+    }
+
+    #[test]
+    fn gap4vl_secret_bound_param_accepts_and_console_print_rejects() {
+        // [GAP4-VALUE-LABEL] accept + reject pair from annotations only:
+        // a `^{secret}`-bounded param accepts a secret argument; the same
+        // secret into Console.print (∅-data bound) is an E6 reject.
+        let ok_src = r#"
+fn send_auth2(a: Str^{secret}) -> Unit {
+    a;
+}
+fn main(console: Console) -> Unit uses {console} {
+    let token: Str^{secret} = "hunter2";
+    send_auth2(token);
+}
+"#;
+        let prog = parse(ok_src).expect("parse ok_src");
+        check_program(&prog).expect("secret must flow into a secret-bounded param");
+
+        let leak_src = r#"
+fn main(console: Console) -> Unit uses {console} {
+    let token: Str^{secret} = "hunter2";
+    console.print(token);
+}
+"#;
+        let prog = parse(leak_src).expect("parse leak_src");
+        let err = check_program(&prog).expect_err("expected E6 reject from source");
+        assert!(err.0.contains("[GAP4-R2-SURFACE]"), "{err}");
+        assert!(err.0.contains("{secret}"), "{err}");
+        assert!(err.0.contains("Console.print"), "{err}");
+    }
+
+    #[test]
+    fn gap4vl_nested_let_label_is_collected() {
+        // [GAP4-VALUE-LABEL] an annotation inside nested control flow is not
+        // silently ignored — the seed harvest walks every block.
+        let src = r#"
+fn main(console: Console) -> Unit uses {console} {
+    if true {
+        let t2: Str^{secret} = "x";
+        console.print(t2);
+    } else {
+        console.print("y");
+    };
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("nested labeled let must reject");
+        assert!(err.0.contains("[GAP4-R2-SURFACE]"), "{err}");
+        assert!(err.0.contains("argument 't2'"), "{err}");
+    }
+
+    #[test]
+    fn gap4vl_label_renders_and_reparses_identically() {
+        // [GAP4-VALUE-LABEL] canonical round-trip: parse -> render -> parse is
+        // AST-stable for labeled bindings (atoms sorted + deduped at parse),
+        // and unlabeled nodes serialize with NO "label" key (hash stability).
+        let src = r#"
+fn send_auth3(a: Str^{secret, untrusted}) -> Unit {
+    a;
+}
+fn main(console: Console) -> Unit uses {console} {
+    let plain: Str = "p";
+    let token: Str^{untrusted, secret, secret} = "x";
+    send_auth3(token);
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let rendered = crate::render_program(&prog);
+        let reparsed = parse(&rendered).expect("reparse rendered");
+        assert_eq!(
+            serde_json::to_string(&prog).unwrap(),
+            serde_json::to_string(&reparsed).unwrap(),
+            "render round-trip must be canonical-AST identical\n{rendered}"
+        );
+        assert!(
+            rendered.contains("Str^{secret, untrusted}"),
+            "canonical atom order in render: {rendered}"
+        );
+        let unlabeled = serde_json::to_string(&Param {
+            name: "x".into(),
+            ty: Type::Str,
+            label: Vec::new(),
+        })
+        .unwrap();
+        assert!(
+            !unlabeled.contains("label"),
+            "unlabeled Param must serialize without a label key: {unlabeled}"
+        );
+    }
+
+    #[test]
+    fn gap4vl_unknown_and_empty_label_atoms_are_parse_errors() {
+        // [GAP4-VALUE-LABEL] the label vocabulary is closed (data atoms only)
+        // and an empty set is pointless — both fail at parse, the earliest
+        // possible gate.
+        let unknown = r#"
+fn main(console: Console) -> Unit uses {console} {
+    let x: Str^{console} = "p";
+    console.print(x);
+}
+"#;
+        let err = parse(unknown).expect_err("unknown atom must not parse");
+        assert!(err.message.contains("unknown label atom"), "{err:?}");
+
+        let empty = r#"
+fn main(console: Console) -> Unit uses {console} {
+    let x: Str^{} = "p";
+    console.print(x);
+}
+"#;
+        let err = parse(empty).expect_err("empty label set must not parse");
+        assert!(err.message.contains("empty label set"), "{err:?}");
     }
 }

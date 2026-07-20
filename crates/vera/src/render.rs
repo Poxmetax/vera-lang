@@ -53,7 +53,7 @@ fn render_fn(f: &FnDecl) -> String {
     let params: Vec<String> = f
         .params
         .iter()
-        .map(|p| format!("{}: {}", p.name, render_type(&p.ty)))
+        .map(|p| format!("{}: {}{}", p.name, render_type(&p.ty), render_label(&p.label)))
         .collect();
     s.push_str(&params.join(", "));
     s.push_str(") -> ");
@@ -104,6 +104,16 @@ pub fn render_type(t: &Type) -> String {
     }
 }
 
+/// [GAP4-VALUE-LABEL] `^{a, b}` postfix for a non-empty binding label
+/// (atoms are parser-canonical, so this render reparses AST-identically).
+fn render_label(label: &[String]) -> String {
+    if label.is_empty() {
+        String::new()
+    } else {
+        format!("^{{{}}}", label.join(", "))
+    }
+}
+
 fn indent(n: usize) -> String {
     "    ".repeat(n)
 }
@@ -128,11 +138,19 @@ fn render_block(b: &Block, depth: usize) -> String {
 
 fn render_stmt(stmt: &Stmt, depth: usize) -> String {
     match stmt {
-        Stmt::Let { name, ty, value, .. } => {
+        Stmt::Let {
+            name,
+            ty,
+            value,
+            label,
+            ..
+        } => {
             let mut s = format!("let {name}");
             if let Some(t) = ty {
                 s.push_str(": ");
                 s.push_str(&render_type(t));
+                // [GAP4-VALUE-LABEL] label rides the explicit annotation only.
+                s.push_str(&render_label(label));
             }
             s.push_str(" = ");
             s.push_str(&render_expr_prec(value, 0, depth));
