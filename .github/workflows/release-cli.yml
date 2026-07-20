@@ -1,0 +1,53 @@
+# Minimal Linux x86_64 vera CLI release asset for agents that can curl.
+# Does not replace Codespace; helps Mode C / network-capable hosts.
+name: release-cli
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Z3 (prove path; build itself does not link Z3)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends z3
+          z3 --version
+
+      - name: Build release binary
+        run: cargo build -p vera --release
+
+      - name: Stage named asset
+        run: |
+          mkdir -p dist
+          cp target/release/vera dist/vera-linux-x86_64
+          chmod +x dist/vera-linux-x86_64
+          ./dist/vera-linux-x86_64 --help | head -n 5
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vera-linux-x86_64
+          path: dist/vera-linux-x86_64
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/vera-linux-x86_64
+          fail_on_unmatched_files: true
+          generate_release_notes: true
