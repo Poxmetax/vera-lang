@@ -4,13 +4,31 @@ use crate::ast::*;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
+/// [P2E-FIX] Structured payload for a machine-applicable fix on a
+/// non-exhaustive `match` (SPEC §4.1): the match expression's span plus the
+/// uncovered arms as valid, arity-aware pattern stubs (e.g. `Shape::Pt(_, _)`).
+/// Plain data — serialization lives in the diag layer (`FixPatch`).
+#[derive(Debug, Clone)]
+pub struct MatchFixInfo {
+    pub span: Span,
+    pub missing: Vec<String>,
+}
+
 #[derive(Debug, Error)]
 #[error("{0}")]
-pub struct TypeError(pub String);
+pub struct TypeError(pub String, pub Option<MatchFixInfo>);
 
 impl TypeError {
     fn at(span: Span, msg: impl Into<String>) -> Self {
-        TypeError(format!("{}: {}", span, msg.into()))
+        TypeError(format!("{}: {}", span, msg.into()), None)
+    }
+
+    /// [P2E-FIX] Error carrying a mechanical fix payload (diag serializes it).
+    fn at_fix(span: Span, msg: impl Into<String>, missing: Vec<String>) -> Self {
+        TypeError(
+            format!("{}: {}", span, msg.into()),
+            Some(MatchFixInfo { span, missing }),
+        )
     }
 }
 
@@ -82,7 +100,7 @@ pub fn check_program(program: &Program) -> Result<(), TypeError> {
         fns.insert(f.name.clone(), f.clone());
     }
     if !fns.contains_key("main") {
-        return Err(TypeError("program must define fn main".into()));
+        return Err(TypeError("program must define fn main".into(), None));
     }
     for fn_decl in &program.functions {
         check_fn(fn_decl, &fns, &adt)?;
@@ -1272,6 +1290,15 @@ fn infer_ctor(
     }
 }
 
+/// [P2E-FIX] `Shape::Pt` + arity 2 -> `Shape::Pt(_, _)`; arity 0 -> bare name.
+fn pattern_stub(name: &str, arity: usize) -> String {
+    if arity == 0 {
+        name.to_string()
+    } else {
+        format!("{name}({})", vec!["_"; arity].join(", "))
+    }
+}
+
 fn check_match(
     scrutinee: &Expr,
     arms: &[MatchArm],
@@ -1307,30 +1334,60 @@ fn check_match(
         match &st {
             Type::Option { .. } => {
                 if !(covered.contains("Some") && covered.contains("None")) {
-                    return Err(TypeError::at(
+                    // [P2E-FIX] uncovered arms as pattern stubs for the FixPatch.
+                    let mut missing: Vec<String> = Vec::new();
+                    if !covered.contains("Some") {
+                        missing.push("Some(_)".into());
+                    }
+                    if !covered.contains("None") {
+                        missing.push("None".into());
+                    }
+                    return Err(TypeError::at_fix(
                         span,
                         "non-exhaustive match on Option (need Some and None, or _)",
+                        missing,
                     ));
                 }
             }
             Type::Result { .. } => {
                 if !(covered.contains("Ok") && covered.contains("Err")) {
-                    return Err(TypeError::at(
+                    // [P2E-FIX] uncovered arms as pattern stubs for the FixPatch.
+                    let mut missing: Vec<String> = Vec::new();
+                    if !covered.contains("Ok") {
+                        missing.push("Ok(_)".into());
+                    }
+                    if !covered.contains("Err") {
+                        missing.push("Err(_)".into());
+                    }
+                    return Err(TypeError::at_fix(
                         span,
                         "non-exhaustive match on Result (need Ok and Err, or _)",
+                        missing,
                     ));
                 }
             }
             Type::Named { name } => {
                 if let Some(ed) = env.adt.enums.get(name) {
+                    // [P2E-FIX] collect ALL uncovered variants (SPEC §4.1 names
+                    // the missing constructors) as arity-aware pattern stubs.
+                    let mut names: Vec<String> = Vec::new();
+                    let mut missing: Vec<String> = Vec::new();
                     for v in &ed.variants {
                         let key = format!("{}::{}", name, v.name);
                         if !covered.contains(&key) && !covered.contains(&v.name) {
-                            return Err(TypeError::at(
-                                span,
-                                format!("non-exhaustive match on {name}: missing {}", v.name),
-                            ));
+                            names.push(v.name.clone());
+                            missing.push(pattern_stub(&key, v.fields.len()));
                         }
+                    }
+                    if !missing.is_empty() {
+                        return Err(TypeError::at_fix(
+                            span,
+                            format!(
+                                "non-exhaustive match on {name}: missing {}",
+                                names.join(", ")
+                            ),
+                            missing,
+                        ));
                     }
                 }
             }
@@ -1863,6 +1920,39 @@ fn main(console: Console) -> Unit uses {console} {
         let err = check_program(&prog).expect_err("expected P2-DUPFN reject");
         assert!(err.0.contains("[P2-DUPFN]"), "{err}");
         assert!(err.0.contains("duplicate function f"), "{err}");
+    }
+
+    #[test]
+    fn p2e_non_exhaustive_enum_match_carries_full_fix_payload() {
+        // [P2E-FIX] message names ALL missing variants; payload = arity-aware
+        // arm pattern stubs anchored at the match expression's span.
+        let src = r#"
+enum Shape {
+    Dot,
+    Line(Int),
+    Rect(Int, Int),
+}
+fn shape_label(s: Shape) -> Str {
+    match s {
+        Shape::Dot => "dot",
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(shape_label(Shape::Dot));
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let err = check_program(&prog).expect_err("expected non-exhaustive reject");
+        assert!(
+            err.0.contains("non-exhaustive match on Shape: missing Line, Rect"),
+            "{err}"
+        );
+        let fix = err.1.as_ref().expect("fix payload");
+        assert_eq!(
+            fix.missing,
+            vec!["Shape::Line(_)".to_string(), "Shape::Rect(_, _)".to_string()]
+        );
+        assert_eq!(fix.span.line, 8, "match expr line, got {:?}", fix.span);
     }
 
     #[test]

@@ -5,7 +5,7 @@
 **Rule:** Factual only -- wording mirrors slice-note honest-limits tables. Do not soften or inflate.  
 **Code fixes:** Fable handoffs only (soft track does not edit `vc.rs` / `smt.rs` / `typecheck.rs` / `interp.rs` / `diag.rs` / `main.rs` / `render.rs` / `label.rs`).
 
-Source assessment: Claude/Fable project review sync 2026-07-20 (post A+B+C+D; suite then 34). Post GAP-1 close: suite **35** (`5c98c75`). Gaps-before-E campaign LANDED: GAP-2..5 commits on local main; suite **50** (`cargo test -p vera --lib`; Fable re-verify: 0 build warnings, SOFT-SMOKE PASS, prove_clamp 6 proved, diag-json schema unchanged 8 keys). Soft ACK: [`CURSOR_SYNC_ACK_GAPS_BEFORE_E.md`](CURSOR_SYNC_ACK_GAPS_BEFORE_E.md).
+Source assessment: Claude/Fable project review sync 2026-07-20 (post A+B+C+D; suite then 34). Post GAP-1 close: suite **35** (`5c98c75`). Gaps-before-E campaign LANDED: GAP-2..5; suite then **50**. **[P2E-FIX]** LANDED (working tree, awaiting Madis commit): suite **53** (`cargo test -p vera --lib`; soft re-verify 2026-07-20: SOFT-SMOKE PASS, prove_clamp 6 proved, FixPatch additive omit-not-null). Soft ACK: [`CURSOR_SYNC_ACK_P2E.md`](CURSOR_SYNC_ACK_P2E.md); prior campaign [`CURSOR_SYNC_ACK_GAPS_BEFORE_E.md`](CURSOR_SYNC_ACK_GAPS_BEFORE_E.md).
 
 | id | gap | why it gets EXPENSIVE later | owner | trigger to revisit |
 |----|-----|------------------------------|-------|--------------------|
@@ -17,12 +17,13 @@ Source assessment: Claude/Fable project review sync 2026-07-20 (post A+B+C+D; su
 | GAP-C1 | Symbolic `nth(xs, xs.len())` / `len(xs)`-as-index not rejected at compile time (P2C decided-literal fragment only). | SPEC REQ-REFINE-2 cites this case; deferral is honest but incomplete vs full REQ-REFINE-2. | **Fable** | After GAP-2 or with symbolic measure reasoning slice; see `P2C_LEN_SLICE.md` |
 | GAP-C2 | SMT encode of `len` as measure still open; `--prove` stays RUNTIME-CHECKED for `Call`/`len`. | Prove tier cannot discharge len-bounds statically; agents may over-trust typecheck-only. | **Fable** | When expanding VC encode fragment; see `PHASE2_VC_SLICE_REPORT.md` / `P2C_LEN_SLICE.md` |
 | GAP-D1 | Call-site obligations (`call_requires` / `call_arg_refine`) are never elided -- interpreter has no call-site identity; callee entry checks always run (conservative, sound). | Fine for soundness; limits CONF-P2 "elided" surface; future elision needs call-site ids. | **Fable** | If elision completeness becomes a gate; see `P2D_ELISION_SLICE.md` |
-| GAP-D2 | No persistent certificate store (D set lives one process). | Same as GAP-5 when crossing process/CI/MCP. | **Fable** | With INV-2 design; see `P2D_ELISION_SLICE.md` / `GAP5_INV2_DESIGN_NOTE.md` |
+| GAP-D2 | No persistent certificate / FixPatch store (D set + E patches live one process / one review cycle). | Same as GAP-5 when crossing process/CI/MCP; stale patch apply risk without INV-2 + content hash. | **Fable** | With INV-2 durable consumer; see `P2D_ELISION_SLICE.md` / `GAP5_INV2_DESIGN_NOTE.md` / `P2E_FIXPATCH_SLICE.md` |
+| GAP-E1 | `TypeError` gained `Option<MatchFixInfo>` 2nd field (`[P2E-FIX]`); `store.rs` adapted arity-only (`TypeError(msg, None)` x4) -- store has no JSON FixPatch surface. | Downstream constructors / pattern matches on `TypeError` must keep the 2-tuple; easy to miss in future store/API paths. | **Fable** (documented) | When extending store diagnostics or SPEC §6.2 FixPatch; see `P2E_FIXPATCH_SLICE.md` |
 
 ## Strengths to preserve (do not regress)
 
 1. Honest-limits tables + sync ACKs that say "do not overclaim".
-2. Thin vertical slices with markers; green suite 17 -> 22 -> 30 -> 34 -> 35 (`[P2-DUPFN]`) -> 44 (`[GAP2-REFINE-TC]`, +9) -> 46 (`[GAP3-RENDER-PAREN]`, +2) -> 49 (`[GAP4-R2-PILOT]`, +3) -> **50** (`[GAP5-INV2]`, +1), zero regressions across A-D + gaps campaign.
+2. Thin vertical slices with markers; green suite 17 -> 22 -> 30 -> 34 -> 35 (`[P2-DUPFN]`) -> 44 (`[GAP2-REFINE-TC]`, +9) -> 46 (`[GAP3-RENDER-PAREN]`, +2) -> 49 (`[GAP4-R2-PILOT]`, +3) -> 50 (`[GAP5-INV2]`, +1) -> **53** (`[P2E-FIX]`, +3), zero regressions across A-E + gaps campaign.
 3. Store invariant: committed codebase always typechecks (`round_trip_all_examples`) -- never add examples that fail typecheck.
 4. Soundness-first prove path: prefer honest RUNTIME-CHECKED over fake PROVED (`[P2-SOUND1/2/3]`).
 
@@ -38,4 +39,4 @@ Bump stale counts / flags in README and slice pointers when baselines change; ke
 - **GAP-4:** lattice-math evidence LANDED (`d4aebd3` / `[GAP4-R2-PILOT]`); R2 inference-ergonomics / CONF-P2 label gate still OPEN -- see claimed/not-claimed table in [`GAP4_R2_PILOT_SLICE.md`](GAP4_R2_PILOT_SLICE.md).
 - **GAP-5:** **DESIGNED** (`23f2e46` / `[GAP5-INV2]` / [`GAP5_INV2_DESIGN_NOTE.md`](GAP5_INV2_DESIGN_NOTE.md)); durable store = GAP-D2.
 - **Campaign:** gaps-before-E complete (GAP-1..5). Soft ACK: [`CURSOR_SYNC_ACK_GAPS_BEFORE_E.md`](CURSOR_SYNC_ACK_GAPS_BEFORE_E.md).
-- **E:** **GREEN-LIT by Madis (2026-07-20)** -- [`CLAUDE_POINTER_P2E_IMPLEMENT.md`](CLAUDE_POINTER_P2E_IMPLEMENT.md). FixPatch JSON stays EPHEMERAL until INV-2 keys wired (cite GAP-5 design note / GAP-D2); GAP-4 lattice-only; no durable cert store in E.
+- **E:** **LANDED** `[P2E-FIX]` (working tree; soft review PASS [`CLAUDE_REVIEW_P2E_FIXPATCH.md`](CLAUDE_REVIEW_P2E_FIXPATCH.md) / [`CURSOR_SYNC_ACK_P2E.md`](CURSOR_SYNC_ACK_P2E.md)). FixPatch JSON stays EPHEMERAL (`ephemeral: true`); durable store = GAP-D2; TypeError arity note = GAP-E1. Do not reopen GAP-2..5.
