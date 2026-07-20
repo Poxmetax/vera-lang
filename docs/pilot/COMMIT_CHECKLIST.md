@@ -17,7 +17,7 @@ Do this **immediately before** `git add` / commit — not earlier in the session
 
 | Check | Expect |
 |-------|--------|
-| `cargo test -p vera --lib` | **59** tests pass (post `[GAPC1-SYM-LEN]` `4fbf7df`; was 56 after `[GAP4-R2-SURFACE]` `658e14b`) |
+| `cargo test -p vera --lib` | **68** tests pass (post `[GAP4-VALUE-LABEL]` `28929dc`; was 63 after `[GAPC2-SMT-LEN]` `f8b67cc`; was 59 after `[GAPC1-SYM-LEN]` `4fbf7df`) |
 | `examples/prove_clamp.vera` | summary contains **`6 proved`**, exit **0** |
 | `examples/prove_runtime_hint.vera` | at least one **`[RUNTIME-CHECKED]`**, exit **0** |
 | `examples/prove_refuted.vera` | **`[REFUTED]`**, exit **3** |
@@ -69,7 +69,7 @@ Paths as of 2026-07-19 soft resume (re-run `git status --short -- vera-lang/` be
 
 **Claude paste rule:** Paste POINTER files to Claude, not full handoffs. Template: [CLAUDE_POINTER_PROMPT_TEMPLATE.md](CLAUDE_POINTER_PROMPT_TEMPLATE.md). Review full bodies still live in [CLAUDE_REVIEW_PROMPT_TEMPLATE.md](CLAUDE_REVIEW_PROMPT_TEMPLATE.md) / topic files (e.g. [CLAUDE_REVIEW_P2_REFINE1_DEF.md](CLAUDE_REVIEW_P2_REFINE1_DEF.md); next C full: [CLAUDE_REVIEW_P2C_LEN.md](CLAUDE_REVIEW_P2C_LEN.md)).
 
-**Sync:** [CURSOR_SYNC_ACK_GAPC1.md](CURSOR_SYNC_ACK_GAPC1.md) (GAP-C1 LANDED soft re-verify PASS, baseline **59**, code `4fbf7df` / publish `0bc3c22`); prior [CURSOR_SYNC_ACK_GAP4_SURFACE.md](CURSOR_SYNC_ACK_GAP4_SURFACE.md) (`658e14b` / `34d7459`); [CURSOR_SYNC_ACK_P2E.md](CURSOR_SYNC_ACK_P2E.md) (`ddc3d6a` / `3c72ce4`). Soft smoke expects **59** tests. Debt: [KNOWN_GAPS.md](KNOWN_GAPS.md). Soft commit candidates: this checklist + queue + GAPC1 ACK/review (+ any soft baseline bumps); **exclude** `*.bak_*`.
+**Sync:** [CURSOR_SYNC_ACK_GAP4_VALUE_LABEL.md](CURSOR_SYNC_ACK_GAP4_VALUE_LABEL.md) (VL LANDED soft re-verify PASS, baseline **68**, code `28929dc` / publish `f4f3cc7`); [CURSOR_SYNC_ACK_GAPC2.md](CURSOR_SYNC_ACK_GAPC2.md) (`f8b67cc` / `f4f3cc7`); prior [CURSOR_SYNC_ACK_GAPC1.md](CURSOR_SYNC_ACK_GAPC1.md) (`4fbf7df` / `0bc3c22`); [CURSOR_SYNC_ACK_GAP4_SURFACE.md](CURSOR_SYNC_ACK_GAP4_SURFACE.md) (`658e14b` / `34d7459`); [CURSOR_SYNC_ACK_P2E.md](CURSOR_SYNC_ACK_P2E.md) (`ddc3d6a` / `3c72ce4`). Soft smoke expects **68** tests. Debt: [KNOWN_GAPS.md](KNOWN_GAPS.md). Soft commit candidates: this checklist + queue + C2/VL ACK/review + bench scaffold (+ any soft baseline bumps); **exclude** `*.bak_*`.
 
 
-See [`SOFT_PARALLEL_QUEUE.md`](SOFT_PARALLEL_QUEUE.md): **ACTIVE (post-freeze, no-rename rule)**. Task E **CLOSED**; GAP4-R2-SURFACE **CLOSED** (`658e14b`); GAP-C1 **CLOSED** (`4fbf7df`); next hard = **TBD Madis-gated**.
+See [`SOFT_PARALLEL_QUEUE.md`](SOFT_PARALLEL_QUEUE.md): **ACTIVE (post-freeze, no-rename rule)**. Task E **CLOSED**; GAP4-R2-SURFACE **CLOSED** (`658e14b`); GAP-C1 **CLOSED** (`4fbf7df`); GAP-C2 **CLOSED** (`f8b67cc`); GAP4-VALUE-LABEL **CLOSED** (`28929dc`); next hard = **TBD Madis-gated** (GAP4-R2-ERGO / F6 / GAP-D2 — do not pick).

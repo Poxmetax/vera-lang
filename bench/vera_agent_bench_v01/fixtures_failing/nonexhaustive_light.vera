@@ -1,0 +1,15 @@
+﻿// Bench fixture — intentionally non-exhaustive (NOT under examples/).
+// Expect --diag-json FixPatch kind add-match-arms for Light::Green.
+
+enum Light {
+    Red,
+    Green,
+}
+fn light_label(l: Light) -> Str {
+    match l {
+        Light::Red => "red",
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(light_label(Light::Red));
+}

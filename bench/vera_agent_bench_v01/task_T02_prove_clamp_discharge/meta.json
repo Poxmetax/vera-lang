@@ -1,0 +1,8 @@
+{
+  "id": "T02",
+  "name": "prove_clamp_discharge",
+  "bucket": "A",
+  "cli": ["--prove"],
+  "expect": { "summary_proved": 6, "exit": 0 },
+  "claims": ["prove_clamp discharges 6 obligations"]
+}
