@@ -60,7 +60,7 @@ What ships today (honest scope):
 • Thin Z3 verification-condition path (`--prove` / `--prove-run`; Z3 optional on PATH)
 • Content-addressed store + typed edit transactions
 • Ephemeral FixPatch on structured diagnostics (not a durable proof cache)
-• Label lattice as a math pilot — not full information-flow control
+• Label lattice pilot + thin seeded checker surface (E1/E6) — not full IFC; no label syntax or inference
 
 This is a research prototype with a Rust reference toolchain, Apache-2.0.
 
@@ -106,7 +106,7 @@ Hi — sharing VERA, an AI-native *research* programming language with a Rust re
 | Refinements + prove | Runtime checks + `vera --prove` / `--prove-run` via Z3 SMT-LIB2 subprocess |
 | Content-addressed store | Parse → hash → render → parse round-trip; typed edit transactions |
 | FixPatch | Ephemeral diagnostic/fix patch (`ephemeral: true`) — **not** a durable proof cache |
-| Label lattice | Lattice-math pilot only — **not** full IFC / label inference |
+| Label lattice | Lattice pilot + thin seeded checker surface (E1/E6) — **not** full IFC; no label syntax or inference |
 
 **Quick start** (needs Rust stable; Z3 on PATH only for `--prove`):
 

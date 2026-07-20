@@ -17,7 +17,7 @@ Do this **immediately before** `git add` / commit — not earlier in the session
 
 | Check | Expect |
 |-------|--------|
-| `cargo test -p vera --lib` | **53** tests pass (post `[P2E-FIX]`; was 50 after gaps-before-E) |
+| `cargo test -p vera --lib` | **56** tests pass (post `[GAP4-R2-SURFACE]` working tree; was 53 after `[P2E-FIX]` `ddc3d6a`) |
 | `examples/prove_clamp.vera` | summary contains **`6 proved`**, exit **0** |
 | `examples/prove_runtime_hint.vera` | at least one **`[RUNTIME-CHECKED]`**, exit **0** |
 | `examples/prove_refuted.vera` | **`[REFUTED]`**, exit **3** |
@@ -69,7 +69,7 @@ Paths as of 2026-07-19 soft resume (re-run `git status --short -- vera-lang/` be
 
 **Claude paste rule:** Paste POINTER files to Claude, not full handoffs. Template: [CLAUDE_POINTER_PROMPT_TEMPLATE.md](CLAUDE_POINTER_PROMPT_TEMPLATE.md). Review full bodies still live in [CLAUDE_REVIEW_PROMPT_TEMPLATE.md](CLAUDE_REVIEW_PROMPT_TEMPLATE.md) / topic files (e.g. [CLAUDE_REVIEW_P2_REFINE1_DEF.md](CLAUDE_REVIEW_P2_REFINE1_DEF.md); next C full: [CLAUDE_REVIEW_P2C_LEN.md](CLAUDE_REVIEW_P2C_LEN.md)).
 
-**Sync:** [CURSOR_SYNC_ACK_P2E.md](CURSOR_SYNC_ACK_P2E.md) (E LANDED soft PASS, baseline **53**, awaiting Madis commit); prior [CURSOR_SYNC_ACK_GAPS_BEFORE_E.md](CURSOR_SYNC_ACK_GAPS_BEFORE_E.md) / [CURSOR_SYNC_ACK_GAP2.md](CURSOR_SYNC_ACK_GAP2.md). Soft smoke expects **53** tests. Debt: [KNOWN_GAPS.md](KNOWN_GAPS.md). Soft commit candidates: this checklist + README + queue + P2E review/ACK/slice + KNOWN_GAPS (Madis commits; **exclude** `*.bak_*`; no auto push).
+**Sync:** [CURSOR_SYNC_ACK_GAP4_SURFACE.md](CURSOR_SYNC_ACK_GAP4_SURFACE.md) (surface LANDED soft re-verify PASS, baseline **56**, awaiting Madis commit); prior [CURSOR_SYNC_ACK_P2E.md](CURSOR_SYNC_ACK_P2E.md) (E committed `ddc3d6a` / push `3c72ce4`). Soft smoke expects **56** tests. Debt: [KNOWN_GAPS.md](KNOWN_GAPS.md). Soft commit candidates: this checklist + README + queue + GAP4 surface ACK/slice + KNOWN_GAPS (Madis commits; **exclude** `*.bak_*`; no auto push).
 
 
-See [`SOFT_PARALLEL_QUEUE.md`](SOFT_PARALLEL_QUEUE.md): **ACTIVE (post-freeze, no-rename rule)**. Task E **LANDED** awaiting Madis commit; next after commit = optional soft push to vera-github.
+See [`SOFT_PARALLEL_QUEUE.md`](SOFT_PARALLEL_QUEUE.md): **ACTIVE (post-freeze, no-rename rule)**. Task E **CLOSED**; GAP4-R2-SURFACE **LANDED** awaiting Madis commit; next after commit = optional soft push to vera-github.

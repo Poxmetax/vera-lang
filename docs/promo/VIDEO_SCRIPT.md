@@ -24,7 +24,7 @@ Refinements check at runtime. When Z3 is on your PATH, `vera --prove` can discha
 
 FixPatch is honest about its limits: machine-applicable, and always marked ephemeral — not a durable certificate store.
 
-Label lattices are a math pilot. They are not full information-flow control.
+Label lattices have a math pilot plus a thin seeded checker surface for explicit-flow E1/E6 rejects. They are not full information-flow control, and there is no label syntax or inference yet.
 
 VERA is a research prototype. Easy to write. Hard to ship silent wrongness.
 
