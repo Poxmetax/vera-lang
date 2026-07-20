@@ -61,3 +61,14 @@ powershell -File bench\vera_agent_bench_v01\task_T01_hello_console\checks\check.
 ```
 
 Z3 must be on PATH for prove tasks.
+
+## Agent tooling note — Glob patterns
+
+Cursor Glob (this environment) finds files when `target_directory`/`path` is set and the pattern begins with a literal directory segment (tool docs auto-prepend `**/` when missing). **Some other agent Glob tools** (e.g. Claude Code) may still return **0 hits** for that combination.
+
+Prefer:
+
+1. Search root = `bench/vera_agent_bench_v01` with pattern `**/*.vera`, or
+2. Monorepo-relative `vera-lang/bench/vera_agent_bench_v01/**/*.vera` from the TradingBot root.
+
+After a glob, sanity-check hit count (expect **9** `.vera` fixtures in this bench). Broad `**/*` may also surface `*.bak_*` under `_operator_archive/` — those are operator archives, **not** scored `initial/main.vera`.
