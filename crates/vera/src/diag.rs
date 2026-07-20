@@ -29,6 +29,25 @@ impl From<Span> for SpanInfo {
     }
 }
 
+/// [P2E-FIX] Machine-applicable fix suggestion attached to a diagnostic
+/// (SPEC DP8; handoff task E). EPHEMERAL by design: produced and
+/// applied-or-discarded within one run/review cycle — never a durable
+/// certificate. A durable store would need INV-2 keying (content hash +
+/// toolchain/solver version): see GAP5_INV2_DESIGN_NOTE.md / GAP-D2.
+#[derive(Debug, Clone, Serialize)]
+pub struct FixPatch {
+    /// Fix kind; this slice ships exactly one: "add-match-arms".
+    pub kind: String,
+    /// Always true this slice — consumers MUST NOT store/replay this patch
+    /// against drifted code (durable apply requires INV-2 keys, GAP-D2).
+    pub ephemeral: bool,
+    /// Anchor: the `match` expression this patch targets.
+    pub span: SpanInfo,
+    /// Valid arm pattern stubs to add, e.g. ["None"] or ["Shape::Pt(_, _)"].
+    /// Arm bodies are the consumer's choice (VERA has no `todo` construct).
+    pub missing: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Diagnostic {
     /// Pipeline stage that produced this: "parse" | "typecheck" | "prove".
@@ -51,6 +70,10 @@ pub struct Diagnostic {
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span: Option<SpanInfo>,
+    /// [P2E-FIX] Present only when a mechanical fix is computable
+    /// (this slice: non-exhaustive match). Omitted from JSON when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix: Option<FixPatch>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,11 +135,20 @@ pub fn diagnostic_from_parse_error(e: &ParseError) -> Diagnostic {
         status: None,
         reason: None,
         span: Some(e.span.into()),
+        fix: None,
     }
 }
 
 pub fn diagnostic_from_type_error(e: &TypeError) -> Diagnostic {
     let (span, message) = split_span_prefix(&e.0);
+    // [P2E-FIX] a non-exhaustive match carries a machine-applicable
+    // add-match-arms patch; every other TypeError has no fix payload.
+    let fix = e.1.as_ref().map(|m| FixPatch {
+        kind: "add-match-arms".into(),
+        ephemeral: true,
+        span: m.span.into(),
+        missing: m.missing.clone(),
+    });
     Diagnostic {
         source: "typecheck".into(),
         severity: "error".into(),
@@ -127,6 +159,7 @@ pub fn diagnostic_from_type_error(e: &TypeError) -> Diagnostic {
         status: None,
         reason: None,
         span,
+        fix,
     }
 }
 
@@ -164,6 +197,7 @@ pub fn diagnostic_from_obligation(o: &Obligation) -> Diagnostic {
         status: Some(status.into()),
         reason,
         span: o.span.map(Into::into),
+        fix: None,
     }
 }
 
@@ -187,6 +221,7 @@ pub fn diagnose_program(file: &str, program: &Program, with_prove: bool) -> Diag
                         status: None,
                         reason: None,
                         span: None,
+                        fix: None,
                     }),
                 }
             }
@@ -337,5 +372,76 @@ fn main(console: Console) -> Unit uses {console} {
         assert!(r.ok);
         assert!(r.diagnostics.is_empty());
         assert_eq!(r.exit_code(), 0);
+    }
+
+    #[test]
+    fn fixpatch_attached_to_non_exhaustive_match() {
+        // [P2E-FIX] the TYPE-ERROR carries an ephemeral add-match-arms patch
+        // whose span matches the diagnostic and whose stubs are arm-ready.
+        let src = r#"
+enum Light {
+    Red,
+    Green,
+}
+fn light_label(l: Light) -> Str {
+    match l {
+        Light::Red => "red",
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(light_label(Light::Red));
+}
+"#;
+        let r = diagnose_source("t.vera", src, false);
+        assert!(!r.ok);
+        assert_eq!(r.exit_code(), 1);
+        let d = &r.diagnostics[0];
+        assert_eq!(d.code, "TYPE-ERROR");
+        let fix = d.fix.as_ref().expect("fix payload");
+        assert_eq!(fix.kind, "add-match-arms");
+        assert!(fix.ephemeral);
+        assert_eq!(fix.missing, vec!["Light::Green".to_string()]);
+        let dspan = d.span.as_ref().expect("diagnostic span");
+        assert_eq!((fix.span.line, fix.span.col), (dspan.line, dspan.col));
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&r).expect("serialize")).expect("json");
+        assert_eq!(v["diagnostics"][0]["fix"]["kind"], "add-match-arms");
+        assert_eq!(v["diagnostics"][0]["fix"]["ephemeral"], true);
+        assert_eq!(v["diagnostics"][0]["fix"]["missing"][0], "Light::Green");
+
+        // Option scrutinee: stub list computed from the uncovered side.
+        let src_opt = r#"
+fn peek(x: Option<Int>) -> Int {
+    match x {
+        Some(v) => v,
+    }
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(peek(Some(1)).show());
+}
+"#;
+        let r2 = diagnose_source("t2.vera", src_opt, false);
+        let f2 = r2.diagnostics[0].fix.as_ref().expect("option fix");
+        assert_eq!(f2.missing, vec!["None".to_string()]);
+    }
+
+    #[test]
+    fn fixpatch_omitted_on_fixless_type_error() {
+        // [P2E-FIX] additive schema: diagnostics without a computable fix
+        // serialize with NO "fix" key at all (omitted, not null).
+        let src = r#"
+fn first(x: Option<Int>) -> Int {
+    let y: Int = x?;
+    y
+}
+fn main(console: Console) -> Unit uses {console} {
+    console.print(first(Some(1)).show());
+}
+"#;
+        let r = diagnose_source("t.vera", src, false);
+        assert!(!r.ok);
+        assert!(r.diagnostics[0].fix.is_none());
+        let json = serde_json::to_string(&r).expect("serialize");
+        assert!(!json.contains("\"fix\""), "{json}");
     }
 }

@@ -11,20 +11,22 @@
 | B | prove ↔ typecheck diagnostics | **done** — `[P2B-DIAG]` `--diag-json` + `diagnose_source`/`diagnose_program` (2026-07-19); FixPatch stays task E |
 | C | REQ-REFINE-2 + `len` measures | **done + review PASS** `976231b` `[P2-REFINE2]` -- SoT [`P2C_LEN_SLICE.md`](P2C_LEN_SLICE.md) |
 | D | INV-1 check-elision | **done + review PASS** `77f7077` `[P2D-ELIDE]` -- SoT [`P2D_ELISION_SLICE.md`](P2D_ELISION_SLICE.md) |
-| E | FixPatch JSON diagnostics | **GREEN-LIT by Madis (2026-07-20)** -- implement now; pointer [`CLAUDE_POINTER_P2E_IMPLEMENT.md`](CLAUDE_POINTER_P2E_IMPLEMENT.md); FixPatch stays EPHEMERAL until INV-2 keys wired -- cite [`GAP5_INV2_DESIGN_NOTE.md`](GAP5_INV2_DESIGN_NOTE.md); GAP-4 lattice-only; unique `fn` names; GAP-2 refine fragment |
+| E | FixPatch JSON diagnostics | **LANDED** `[P2E-FIX]` (working tree; awaiting Madis commit) -- SoT [`P2E_FIXPATCH_SLICE.md`](P2E_FIXPATCH_SLICE.md); soft review PASS [`CLAUDE_REVIEW_P2E_FIXPATCH.md`](CLAUDE_REVIEW_P2E_FIXPATCH.md) / ACK [`CURSOR_SYNC_ACK_P2E.md`](CURSOR_SYNC_ACK_P2E.md); FixPatch stays EPHEMERAL (GAP-D2 durable store not claimed); GAP-4 lattice-only |
 | GAP-1 | dup-fn typecheck reject | **CLOSED** `5c98c75` `[P2-DUPFN]` |
 | GAP-2 | refine-pred def-time TC | **CLOSED** `c5222a8` `[GAP2-REFINE-TC]` / [`GAP2_REFINE_PRED_TC_SLICE.md`](GAP2_REFINE_PRED_TC_SLICE.md) |
 | GAP-3 | render parens / round-trip | **CLOSED** `226e33c` `[GAP3-RENDER-PAREN]` / [`GAP3_RENDER_PAREN_SLICE.md`](GAP3_RENDER_PAREN_SLICE.md) |
 | GAP-4 | R2 thin pilot | **LANDED** `d4aebd3` `[GAP4-R2-PILOT]` lattice-math evidence ONLY -- [`GAP4_R2_PILOT_SLICE.md`](GAP4_R2_PILOT_SLICE.md); R2 ergonomics / CONF-P2 label gate still OPEN |
 | GAP-5 | INV-2 design | **DESIGNED** `23f2e46` `[GAP5-INV2]` / [`GAP5_INV2_DESIGN_NOTE.md`](GAP5_INV2_DESIGN_NOTE.md); no durable store (GAP-D2) |
+| **GAP4-R2-SURFACE** | Thin label typecheck surface (post-E) | **NEXT recommended** -- awaiting Madis paste / green-light; full [FABLE5_GAP4_R2_SURFACE_HANDOFF_PROMPT.md](FABLE5_GAP4_R2_SURFACE_HANDOFF_PROMPT.md); paste [CLAUDE_POINTER_GAP4_R2_SURFACE_IMPLEMENT.md](CLAUDE_POINTER_GAP4_R2_SURFACE_IMPLEMENT.md); **not** full IFC; prefer Madis commit of E first |
 
 Handoff (A-E overview): [FABLE5_CONF_P2_HANDOFF_PROMPT.md](FABLE5_CONF_P2_HANDOFF_PROMPT.md).
-**Task C implement:** paste [CLAUDE_POINTER_P2C_IMPLEMENT.md](CLAUDE_POINTER_P2C_IMPLEMENT.md) (not the full handoff). Full brief: [FABLE5_CONF_P2C_HANDOFF_PROMPT.md](FABLE5_CONF_P2C_HANDOFF_PROMPT.md). **Paste POINTER files to Claude, not full handoffs.**
-**Sync ACK (Cursor):** [CURSOR_SYNC_ACK_GAPS_BEFORE_E.md](CURSOR_SYNC_ACK_GAPS_BEFORE_E.md) (campaign complete, baseline **50**); prior [CURSOR_SYNC_ACK_GAP2.md](CURSOR_SYNC_ACK_GAP2.md) / [CURSOR_SYNC_ACK_P2_DUPFN.md](CURSOR_SYNC_ACK_P2_DUPFN.md). Soft frozen on Fable files.
+**Next after E (recommended):** paste [CLAUDE_POINTER_GAP4_R2_SURFACE_IMPLEMENT.md](CLAUDE_POINTER_GAP4_R2_SURFACE_IMPLEMENT.md) (not the full handoff). Full brief: [FABLE5_GAP4_R2_SURFACE_HANDOFF_PROMPT.md](FABLE5_GAP4_R2_SURFACE_HANDOFF_PROMPT.md). **Paste POINTER files to Claude, not full handoffs.**
+**Task C implement (historical):** paste [CLAUDE_POINTER_P2C_IMPLEMENT.md](CLAUDE_POINTER_P2C_IMPLEMENT.md). Full brief: [FABLE5_CONF_P2C_HANDOFF_PROMPT.md](FABLE5_CONF_P2C_HANDOFF_PROMPT.md).
+**Sync ACK (Cursor):** [CURSOR_SYNC_ACK_P2E.md](CURSOR_SYNC_ACK_P2E.md) (E LANDED soft PASS, baseline **53**); prior [CURSOR_SYNC_ACK_GAPS_BEFORE_E.md](CURSOR_SYNC_ACK_GAPS_BEFORE_E.md) / [CURSOR_SYNC_ACK_GAP2.md](CURSOR_SYNC_ACK_GAP2.md). Soft frozen on Fable files.
 
-**Claude review prompts:** pointer template [CLAUDE_POINTER_PROMPT_TEMPLATE.md](CLAUDE_POINTER_PROMPT_TEMPLATE.md); full review template [CLAUDE_REVIEW_PROMPT_TEMPLATE.md](CLAUDE_REVIEW_PROMPT_TEMPLATE.md); P2-REFINE1 call-site [CLAUDE_REVIEW_P2_REFINE1.md](CLAUDE_REVIEW_P2_REFINE1.md); def-time [CLAUDE_REVIEW_P2_REFINE1_DEF.md](CLAUDE_REVIEW_P2_REFINE1_DEF.md); **next (post-C land) chat paste** [CLAUDE_POINTER_P2C_REVIEW.md](CLAUDE_POINTER_P2C_REVIEW.md) (full: [CLAUDE_REVIEW_P2C_LEN.md](CLAUDE_REVIEW_P2C_LEN.md); review only -- not implement).
+**Claude review prompts:** pointer template [CLAUDE_POINTER_PROMPT_TEMPLATE.md](CLAUDE_POINTER_PROMPT_TEMPLATE.md); full review template [CLAUDE_REVIEW_PROMPT_TEMPLATE.md](CLAUDE_REVIEW_PROMPT_TEMPLATE.md); **post-E soft review (filled PASS)** [CLAUDE_POINTER_P2E_REVIEW.md](CLAUDE_POINTER_P2E_REVIEW.md) (full: [CLAUDE_REVIEW_P2E_FIXPATCH.md](CLAUDE_REVIEW_P2E_FIXPATCH.md)); prior C/D review pointers still archaeology.
 
-**Do not edit while Fable owns:** `vc.rs`, `smt.rs`, `typecheck.rs`, `interp.rs`, **`diag.rs`**, **`render.rs`**, **`label.rs`**, **`main.rs`** (prefer leave `parser.rs` / `ast.rs` alone). Soft track: E is green-lit -- do not soft-steal FixPatch / `diag.rs` while Fable implements.
+**Do not edit while Fable owns:** `vc.rs`, `smt.rs`, `typecheck.rs`, `interp.rs`, **`diag.rs`**, **`store.rs`**, **`render.rs`**, **`label.rs`**, **`main.rs`** (prefer leave `parser.rs` / `ast.rs` alone). Soft track: E landed -- soft docs/baselines only until Madis commits; do not soft-steal FixPatch code.
 
 ## Soft track (parallel-safe)
 
@@ -52,7 +54,7 @@ $env:Path = "C:\Users\madis\.cargo\bin;" + $env:Path + ";C:\Users\madis\Desktop\
 cd C:\Users\madis\Desktop\TradingBot\vera-lang
 cargo test -p vera --lib
 cargo run -p vera -- --prove examples/prove_clamp.vera
-# expect: 50 tests pass (post gaps-before-E); prove_clamp -> 6 proved
+# expect: 53 tests pass (post [P2E-FIX]); prove_clamp -> 6 proved
 cargo run -p vera -- --prove examples/prove_runtime_hint.vera
 # expect: ≥1 [RUNTIME-CHECKED]
 cargo run -p vera -- --prove examples/prove_refuted.vera
@@ -62,4 +64,4 @@ cargo run -p vera -- --prove examples/prove_refuted.vera
 
 ## Soft track status (post-freeze)
 
-**ACTIVE (post-freeze, no-rename rule).** Expect **50** tests. Gaps-before-E campaign **complete** (GAP-1..5). **Next:** Task E **GREEN-LIT** (Madis 2026-07-20) -- Fable implements FixPatch; soft stays off `diag.rs`. Debt: [KNOWN_GAPS.md](KNOWN_GAPS.md). Commit gate: [COMMIT_CHECKLIST.md](COMMIT_CHECKLIST.md).
+**ACTIVE (post-freeze, no-rename rule).** Expect **53** tests. Task E **LANDED** `[P2E-FIX]` (awaiting Madis commit; soft review PASS). **Next hard (recommended):** GAP4-R2-SURFACE -- Madis pastes [CLAUDE_POINTER_GAP4_R2_SURFACE_IMPLEMENT.md](CLAUDE_POINTER_GAP4_R2_SURFACE_IMPLEMENT.md) after E commit (prefer). Soft may still optional-push vera-github (Madis decides). Do not soft-steal label/typecheck/diag; do not open GAP-D2 unless Madis switches. Debt: [KNOWN_GAPS.md](KNOWN_GAPS.md). Commit gate: [COMMIT_CHECKLIST.md](COMMIT_CHECKLIST.md).

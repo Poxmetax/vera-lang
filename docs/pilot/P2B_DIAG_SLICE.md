@@ -34,6 +34,7 @@ Per diagnostic:
 | `status` | prove tier: `proved` \| `runtime-checked` \| `refuted` |
 | `reason` | runtime-checked reason / refuted detail |
 | `span` | `{line, col}` when known |
+| `fix` | `[P2E-FIX]` optional machine-applicable FixPatch (`add-match-arms`, `ephemeral: true`); omitted when absent — see [`P2E_FIXPATCH_SLICE.md`](P2E_FIXPATCH_SLICE.md) |
 
 Optional fields are omitted (not `null`) when absent.
 
@@ -63,7 +64,7 @@ Optional fields are omitted (not `null`) when absent.
 |---|---|
 | Typecheck errors are fail-fast (one per report, matching `check_program`) | collecting multiple type errors = later slice |
 | Span granularity | fn-decl / call-expr / error-token level; no end-spans or ranges |
-| `FixPatch` machine-applicable edits | **not this slice** — handoff task E |
+| `FixPatch` machine-applicable edits | **landed** — `[P2E-FIX]` / [`P2E_FIXPATCH_SLICE.md`](P2E_FIXPATCH_SLICE.md) (add-match-arms, ephemeral; non-exhaustive match only) |
 | Proof-gated check elision | **not this slice** — handoff task D |
 | Text `--prove` output | untouched (byte-identical), still the human default |
 
@@ -72,7 +73,7 @@ Optional fields are omitted (not `null`) when absent.
 ```powershell
 cd C:\Users\madis\Desktop\TradingBot\vera-lang
 cargo test -p vera --lib -- diag::
-# expect: 5 passed (22 total suite)
+# expect: 7 passed (5 P2B + 2 P2E fixpatch_*)
 cargo run -p vera -- --prove --diag-json examples/prove_refuted.vera   # refuted JSON, exit 3
 cargo run -p vera -- --prove --diag-json examples/prove_clamp.vera     # summary.proved = 6, exit 0
 cargo run -p vera -- --diag-json examples/hello.vera                   # ok:true, empty, exit 0

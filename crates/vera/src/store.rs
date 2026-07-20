@@ -121,9 +121,12 @@ impl CodebaseStore {
         check_program(&p2)?;
         let h2 = Self::hash_program(&p2);
         if h1 != h2 {
-            return Err(StoreError::Type(TypeError(format!(
-                "round-trip hash mismatch: {h1} != {h2}\n--- rendered ---\n{rendered}"
-            ))));
+            return Err(StoreError::Type(TypeError(
+                format!(
+                    "round-trip hash mismatch: {h1} != {h2}\n--- rendered ---\n{rendered}"
+                ),
+                None,
+            )));
         }
         Ok((h1, rendered))
     }
@@ -161,6 +164,7 @@ impl CodebaseStore {
                     if frag.functions.len() != 1 {
                         return Err(StoreError::Type(TypeError(
                             "InsertFn expects exactly one fn in source".into(),
+                            None,
                         )));
                     }
                     let f = frag.functions.into_iter().next().unwrap();
@@ -174,14 +178,15 @@ impl CodebaseStore {
                     if frag.functions.len() != 1 {
                         return Err(StoreError::Type(TypeError(
                             "ReplaceFn expects exactly one fn in source".into(),
+                            None,
                         )));
                     }
                     let f = frag.functions.into_iter().next().unwrap();
                     if &f.name != name {
-                        return Err(StoreError::Type(TypeError(format!(
-                            "ReplaceFn name mismatch: expected {name}, got {}",
-                            f.name
-                        ))));
+                        return Err(StoreError::Type(TypeError(
+                            format!("ReplaceFn name mismatch: expected {name}, got {}", f.name),
+                            None,
+                        )));
                     }
                     let Some(slot) = prog.functions.iter_mut().find(|x| &x.name == name) else {
                         return Err(StoreError::Unknown(name.clone()));
