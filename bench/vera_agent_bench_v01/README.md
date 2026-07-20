@@ -4,6 +4,8 @@
 **Decision SoT:** [`docs/pilot/VERA_AGENT_BENCH_V01_DECISION.md`](../../docs/pilot/VERA_AGENT_BENCH_V01_DECISION.md)  
 **Rule:** Prefer claim-less. Not a leaderboard. Not IFC. Not durable FixPatch.
 
+**Public trial note (2026-07-20):** claim-less scoreboard + pros/cons → [`results/TRIAL_ROUND_2026-07-20_PUBLIC.md`](results/TRIAL_ROUND_2026-07-20_PUBLIC.md).
+
 ## What this is
 
 Hand-oracled tasks that exercise existing CLI surfaces:
