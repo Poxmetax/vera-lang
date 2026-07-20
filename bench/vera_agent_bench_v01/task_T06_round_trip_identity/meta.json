@@ -1,0 +1,8 @@
+{
+  "id": "T06",
+  "name": "round_trip_identity",
+  "bucket": "A",
+  "cli": ["--round-trip"],
+  "expect": { "stdout_contains": "round-trip OK", "exit": 0 },
+  "claims": ["store round-trip CLI works on hello fixture"]
+}
