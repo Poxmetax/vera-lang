@@ -1,4 +1,4 @@
-# Dependabot — cargo ecosystem only (research prototype)
+# Dependabot — cargo + github-actions ecosystems (research prototype)
 version: 2
 updates:
   - package-ecosystem: "cargo"
@@ -10,3 +10,13 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "deps"
+  # [CI-HARDEN] keep the pinned action SHAs current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "ci"

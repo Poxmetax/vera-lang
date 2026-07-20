@@ -8,18 +8,26 @@ on:
       - "v*"
   workflow_dispatch:
 
+# [CI-HARDEN] Least privilege: workflow default is read; the build job elevates
+# to write only for the release-attach step below.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-linux-x86_64:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # [CI-HARDEN] pinned to the commit v4 pointed at on 2026-07-20.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        # [CI-HARDEN] `stable` is a moving branch; pin the resolved commit.
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable @ 2026-07-20
 
       - name: Install Z3 (prove path; build itself does not link Z3)
         run: |
@@ -38,7 +46,7 @@ jobs:
           ./dist/vera-linux-x86_64 --help | head -n 5
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: vera-linux-x86_64
           path: dist/vera-linux-x86_64
@@ -46,7 +54,7 @@ jobs:
 
       - name: Attach to GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist/vera-linux-x86_64
           fail_on_unmatched_files: true
