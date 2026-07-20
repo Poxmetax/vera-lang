@@ -18,7 +18,7 @@ Public repo: [github.com/Poxmetax/vera-lang](https://github.com/Poxmetax/vera-la
 | **Refinements + prove** | Runtime checks + `vera --prove` / `--prove-run` via Z3 SMT-LIB2 subprocess |
 | **Content-addressed store** | Parse → hash → render → parse round-trip; typed edit transactions |
 | **FixPatch** | Ephemeral diagnostic/fix patch path (CONF-P2); **not** a durable proof cache |
-| **Label lattice** | Lattice-math pilot only — **not** full IFC / label inference |
+| **Label lattice** | Lattice pilot + thin seeded checker surface (E1/E6 rejects in typecheck) — **not** full IFC; no label syntax or inference |
 
 This is a **research prototype**, not a production language. Do not read “pilot” as “information-flow control shipped.”
 

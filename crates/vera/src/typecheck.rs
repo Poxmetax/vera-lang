@@ -1,6 +1,7 @@
 //! Lightweight Phase 1 type checker (annotated MVP; HM deferred).
 
 use crate::ast::*;
+use crate::label::{Atom, Label};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
@@ -105,7 +106,11 @@ pub fn check_program(program: &Program) -> Result<(), TypeError> {
     for fn_decl in &program.functions {
         check_fn(fn_decl, &fns, &adt)?;
     }
-    Ok(())
+    // [GAP4-R2-SURFACE] Front-door label pass with EMPTY seeds — inert by the
+    // lattice laws (every label is ⊥, and ⊥ ⊑ ⊥ always holds), so no
+    // well-typed program changes verdict; the seeded entry point is the
+    // demonstrable surface.
+    check_program_labels(program, &HashMap::new())
 }
 
 fn check_fn(
@@ -1522,6 +1527,233 @@ fn check_pattern(
     }
 }
 
+// ---------------------------------------------------------------------------
+// [GAP4-R2-SURFACE] Thin label typecheck surface over the [GAP4-R2-PILOT]
+// lattice (SPEC §4.2 SUB-LABEL sink upper bound). Scope: EXPLICIT flows only,
+// one hop — a call argument that is a plain `Name` carries its seeded label;
+// every other expression shape is ⊥ (no taint propagation through
+// computation this slice). Enforcement points:
+//   1. named-fn call arguments against the callee parameter's seeded upper
+//      bound (E1 injection shape: `db.insert`-style ∅-data params);
+//   2. `Console.print` arguments against the ∅-data sink bound SPEC §4.2
+//      names verbatim (E6 leak shape).
+// Source labels and sink bounds BOTH come from `seeds`
+// ((fn name, binding name) -> Label) — there is no value-label syntax yet
+// (SPEC §3: `T^{...}` may be post-MVP; `uses` stays the only authority
+// surface). Bounds compare on the DATA projection (SPEC wording: sinks bound
+// "at ∅-data"), so authority atoms on capability handles never trip a data
+// bound. NOT full IFC, NOT the R2 inference-ergonomics gate, NOT implicit
+// flows.
+// ---------------------------------------------------------------------------
+
+/// [GAP4-R2-SURFACE] Seeded label pass. Run it after `check_program` (or on
+/// an otherwise well-typed program): the walk assumes `.print` field-calls
+/// are `Console.print` — the only field-call sink in the MVP surface — and
+/// re-runs no other check. `check_program` itself calls this with empty
+/// seeds, which is inert by the lattice laws.
+pub fn check_program_labels(
+    program: &Program,
+    seeds: &HashMap<(String, String), Label>,
+) -> Result<(), TypeError> {
+    let mut fns: HashMap<String, &FnDecl> = HashMap::new();
+    for f in &program.functions {
+        fns.insert(f.name.clone(), f);
+    }
+    for f in &program.functions {
+        label_walk_block(&f.body, &f.name, &fns, seeds)?;
+    }
+    Ok(())
+}
+
+/// Seeded label of a binding, ⊥ when unseeded.
+fn seed_label(
+    seeds: &HashMap<(String, String), Label>,
+    fn_name: &str,
+    binding: &str,
+) -> Label {
+    seeds
+        .get(&(fn_name.to_string(), binding.to_string()))
+        .cloned()
+        .unwrap_or_else(Label::bottom)
+}
+
+/// One-hop source rule: a bare `Name` argument carries its seeded label;
+/// every other expression shape is ⊥ this slice.
+fn label_of_arg(
+    arg: &Expr,
+    fn_name: &str,
+    seeds: &HashMap<(String, String), Label>,
+) -> Label {
+    match arg {
+        Expr::Name { name, .. } => seed_label(seeds, fn_name, name),
+        _ => Label::bottom(),
+    }
+}
+
+fn label_data_str(l: &Label) -> String {
+    let atoms: Vec<&str> = l
+        .0
+        .iter()
+        .map(|a| match a {
+            Atom::Auth(name) => name.as_str(),
+            Atom::Untrusted => "untrusted",
+            Atom::Secret => "secret",
+        })
+        .collect();
+    format!("{{{}}}", atoms.join(", "))
+}
+
+/// (SUB-LABEL) data-projection flow check: `arg.data() ⊑ bound.data()`.
+fn check_data_flow(
+    arg: &Label,
+    bound: &Label,
+    what: &str,
+    sink: &str,
+    span: Span,
+) -> Result<(), TypeError> {
+    let (a, b) = (arg.data(), bound.data());
+    if a.flows_to(&b) {
+        Ok(())
+    } else {
+        Err(TypeError::at(
+            span,
+            format!(
+                "[GAP4-R2-SURFACE] ill-labeled flow: {what} with data label {} does not flow to {sink} (bound {})",
+                label_data_str(&a),
+                label_data_str(&b),
+            ),
+        ))
+    }
+}
+
+fn arg_desc(arg: &Expr) -> String {
+    match arg {
+        Expr::Name { name, .. } => format!("argument '{name}'"),
+        _ => "argument".to_string(),
+    }
+}
+
+fn label_walk_block(
+    block: &Block,
+    fn_name: &str,
+    fns: &HashMap<String, &FnDecl>,
+    seeds: &HashMap<(String, String), Label>,
+) -> Result<(), TypeError> {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let { value, .. } => label_walk_expr(value, fn_name, fns, seeds)?,
+            Stmt::Expr { expr, .. } => label_walk_expr(expr, fn_name, fns, seeds)?,
+        }
+    }
+    if let Some(res) = &block.result {
+        label_walk_expr(res, fn_name, fns, seeds)?;
+    }
+    Ok(())
+}
+
+fn label_walk_expr(
+    expr: &Expr,
+    fn_name: &str,
+    fns: &HashMap<String, &FnDecl>,
+    seeds: &HashMap<(String, String), Label>,
+) -> Result<(), TypeError> {
+    match expr {
+        Expr::Call { callee, args, span } => {
+            if let Expr::Name { name, .. } = callee.as_ref() {
+                // (SUB-LABEL) E1 shape: each argument's data label must stay
+                // within the callee parameter's seeded upper bound.
+                if let Some(fd) = fns.get(name) {
+                    for (a, p) in args.iter().zip(fd.params.iter()) {
+                        let al = label_of_arg(a, fn_name, seeds);
+                        let bound = seed_label(seeds, &fd.name, &p.name);
+                        check_data_flow(
+                            &al,
+                            &bound,
+                            &arg_desc(a),
+                            &format!("parameter '{}' of {}", p.name, fd.name),
+                            *span,
+                        )?;
+                    }
+                }
+            }
+            if let Expr::FieldAccess { field, .. } = callee.as_ref() {
+                // (SUB-LABEL) E6 shape: Console.print bounds its argument at
+                // ∅-data (SPEC §4.2's verbatim leak example).
+                if field == "print" {
+                    for a in args {
+                        let al = label_of_arg(a, fn_name, seeds);
+                        check_data_flow(
+                            &al,
+                            &Label::bottom(),
+                            &arg_desc(a),
+                            "Console.print",
+                            *span,
+                        )?;
+                    }
+                }
+            }
+            label_walk_expr(callee, fn_name, fns, seeds)?;
+            for a in args {
+                label_walk_expr(a, fn_name, fns, seeds)?;
+            }
+            Ok(())
+        }
+        Expr::BinOp { left, right, .. } => {
+            label_walk_expr(left, fn_name, fns, seeds)?;
+            label_walk_expr(right, fn_name, fns, seeds)
+        }
+        Expr::UnaryOp { expr: e, .. } | Expr::Propagate { expr: e, .. } => {
+            label_walk_expr(e, fn_name, fns, seeds)
+        }
+        Expr::FieldAccess { obj, .. } => label_walk_expr(obj, fn_name, fns, seeds),
+        Expr::Ctor { args, .. } => {
+            for a in args {
+                label_walk_expr(a, fn_name, fns, seeds)?;
+            }
+            Ok(())
+        }
+        Expr::StructLit { fields, .. } => {
+            for (_, e) in fields {
+                label_walk_expr(e, fn_name, fns, seeds)?;
+            }
+            Ok(())
+        }
+        Expr::ListLit { elems, .. } => {
+            for e in elems {
+                label_walk_expr(e, fn_name, fns, seeds)?;
+            }
+            Ok(())
+        }
+        Expr::Lambda { body, .. } => label_walk_block(body, fn_name, fns, seeds),
+        Expr::IfExpr {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            label_walk_expr(cond, fn_name, fns, seeds)?;
+            label_walk_block(then_body, fn_name, fns, seeds)?;
+            label_walk_block(else_body, fn_name, fns, seeds)
+        }
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
+            label_walk_expr(scrutinee, fn_name, fns, seeds)?;
+            for arm in arms {
+                label_walk_expr(&arm.body, fn_name, fns, seeds)?;
+            }
+            Ok(())
+        }
+        Expr::Block(b) => label_walk_block(b, fn_name, fns, seeds),
+        Expr::LitInt { .. }
+        | Expr::LitStr { .. }
+        | Expr::LitBool { .. }
+        | Expr::LitUnit { .. }
+        | Expr::Name { .. }
+        | Expr::Hole { .. } => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2006,5 +2238,91 @@ fn main(console: Console) -> Unit uses {console} {
         let prog = parse(src).expect("parse");
         let err = check_program(&prog).expect_err("expected err-type mismatch reject");
         assert!(err.0.contains("error type"), "{err}");
+    }
+
+    #[test]
+    fn gap4_surface_rejects_untrusted_arg_into_bare_param_e1() {
+        // [GAP4-R2-SURFACE] E1 injection shape (SPEC §4.2): store_row's `row`
+        // is unlabeled (⊥-data bound), so an `untrusted`-seeded argument must
+        // not flow into it. The same program stays green on the ordinary
+        // front door (empty seeds — inertness half of the pair).
+        let src = r#"
+fn store_row(row: Str) -> Unit {
+    row;
+}
+fn main(console: Console) -> Unit uses {console} {
+    let user_input: Str = "row";
+    store_row(user_input);
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("front door (empty seeds) must stay green");
+        let mut seeds: HashMap<(String, String), Label> = HashMap::new();
+        seeds.insert(
+            ("main".into(), "user_input".into()),
+            Label::of(&[Atom::Untrusted]),
+        );
+        let err = check_program_labels(&prog, &seeds).expect_err("expected E1 reject");
+        assert!(err.0.contains("[GAP4-R2-SURFACE]"), "{err}");
+        assert!(err.0.contains("argument 'user_input'"), "{err}");
+        assert!(err.0.contains("{untrusted}"), "{err}");
+        assert!(err.0.contains("parameter 'row' of store_row"), "{err}");
+    }
+
+    #[test]
+    fn gap4_surface_rejects_secret_arg_into_console_print_e6() {
+        // [GAP4-R2-SURFACE] E6 leak shape (SPEC §4.2's verbatim example):
+        // Console.print bounds its argument at ∅-data, so a `secret`-seeded
+        // value must not reach it.
+        let src = r#"
+fn main(console: Console) -> Unit uses {console} {
+    let token: Str = "hunter2";
+    console.print(token);
+}
+"#;
+        let prog = parse(src).expect("parse");
+        check_program(&prog).expect("front door (empty seeds) must stay green");
+        let mut seeds: HashMap<(String, String), Label> = HashMap::new();
+        seeds.insert(("main".into(), "token".into()), Label::of(&[Atom::Secret]));
+        let err = check_program_labels(&prog, &seeds).expect_err("expected E6 reject");
+        assert!(err.0.contains("[GAP4-R2-SURFACE]"), "{err}");
+        assert!(err.0.contains("{secret}"), "{err}");
+        assert!(err.0.contains("Console.print"), "{err}");
+    }
+
+    #[test]
+    fn gap4_surface_accepts_bounded_sink_and_auth_handle() {
+        // [GAP4-R2-SURFACE] accept side of the pair: (a) a parameter seeded
+        // at {secret} accepts a secret argument (`net.connect(auth:)` shape);
+        // (b) an authority atom is not data — the ∅-data bound of an
+        // unseeded parameter does not fire on a capability handle
+        // (TAINT-PROP philosophy: authority rides handles, it does not
+        // taint).
+        let src = r#"
+fn send_auth(a: Str) -> Unit {
+    a;
+}
+fn main(console: Console) -> Unit uses {console} {
+    let token: Str = "hunter2";
+    send_auth(token);
+}
+"#;
+        let prog = parse(src).expect("parse");
+        let mut seeds: HashMap<(String, String), Label> = HashMap::new();
+        seeds.insert(("main".into(), "token".into()), Label::of(&[Atom::Secret]));
+        seeds.insert(
+            ("send_auth".into(), "a".into()),
+            Label::of(&[Atom::Secret]),
+        );
+        check_program_labels(&prog, &seeds)
+            .expect("secret must flow into a secret-bounded sink");
+
+        let mut auth_seeds: HashMap<(String, String), Label> = HashMap::new();
+        auth_seeds.insert(
+            ("main".into(), "token".into()),
+            Label::of(&[Atom::Auth("console".into())]),
+        );
+        check_program_labels(&prog, &auth_seeds)
+            .expect("authority atoms are not data; a ⊥-data bound must not fire");
     }
 }
