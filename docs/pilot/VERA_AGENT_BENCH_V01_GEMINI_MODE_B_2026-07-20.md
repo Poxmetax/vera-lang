@@ -22,6 +22,8 @@
 
 **Contamination root cause:** Fable’s successful FixPatch trial left the **fixed** copy in `initial/`. Gemini Mode B therefore saw an already-exhaustive fixture and could not honestly exercise the intended FixPatch → edit path.
 
+> **Footnote (post-trial hygiene):** After this Mode B trial, T05 `initial/main.vera` was restored from `fixtures_failing/nonexhaustive_light.vera` (MD5 match to SoT). The pre-restore copy was quarantined under `bench/vera_agent_bench_v01/_operator_archive/`. Historical Mode B scores in this note are unchanged.
+
 ---
 
 ## 1. Scoreboard (Gemini Mode B — soft)
@@ -82,7 +84,7 @@ Optional keep path suggestion:
 - Soft note only — no language / model superiority claim from this Mode B paste.
 - T07/T08 SKIP is protocol-OK, not a fail.
 - Earlier soft compare (`VERA_AGENT_BENCH_V01_TRIAL_COMPARE_2026-07-20.md`) covered web **SKIP(env)** trials; this note is **Mode B** (pasted CLI) and supersedes that Gemini row for Mode B scoring only.
-- Fixture restore **not** applied this turn (document-first); operator should approve the surgical copy + commit.
+- Fixture restore was **not** applied in the original Mode B scoring turn (document-first). See footnote above for the later post-trial restore.
 
 ---
 

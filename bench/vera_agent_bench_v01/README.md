@@ -72,3 +72,5 @@ Prefer:
 2. Monorepo-relative `vera-lang/bench/vera_agent_bench_v01/**/*.vera` from the TradingBot root.
 
 After a glob, sanity-check hit count (expect **9** `.vera` fixtures in this bench). Broad `**/*` may also surface `*.bak_*` under `_operator_archive/` — those are operator archives, **not** scored `initial/main.vera`.
+
+Crate/`docs` soft-patch `*.bak_*` archaeology is **local-only** under `vera-lang/_operator_archive/crate_src_bak/` (and `docs_bak/`); see [`../../_operator_archive/README.md`](../../_operator_archive/README.md). Bench `task_*` pre-restore baks in this folder remain tracked.
