@@ -2,8 +2,9 @@
 
 **Date:** 2026-07-20  
 **Commit:** `28929dc` (TradingBot main; code + slice)  
-**Publish:** merge `f4f3cc7` on GitHub main / vera-lang subtree (`bcce500..f4f3cc7`; VL snapshot `4033cd2`)  
-**Sibling:** GAP-C2 `[GAPC2-SMT-LEN]` commit `f8b67cc` (same publish merge) — soft ACK [`CURSOR_SYNC_ACK_GAPC2.md`](CURSOR_SYNC_ACK_GAPC2.md)  
+**Publish:** code merge `f4f3cc7` on GitHub main / vera-lang subtree (`bcce500..f4f3cc7`; VL snapshot `4033cd2`); soft-docs merge `43c8064` (`b3a248f` snapshot)  
+**Soft review docs:** `19c83a2` (TradingBot main; review/ACK/queue/checklist + VeraAgentBench scaffold)  
+**Sibling:** GAP-C2 `[GAPC2-SMT-LEN]` commit `f8b67cc` (same code publish merge) — soft ACK [`CURSOR_SYNC_ACK_GAPC2.md`](CURSOR_SYNC_ACK_GAPC2.md)  
 **Soft review:** PASS -- [`CLAUDE_REVIEW_GAP4_VALUE_LABEL.md`](CLAUDE_REVIEW_GAP4_VALUE_LABEL.md) / pointer [`CLAUDE_POINTER_GAP4_VALUE_LABEL_REVIEW.md`](CLAUDE_POINTER_GAP4_VALUE_LABEL_REVIEW.md)  
 **SoT:** [`GAP4_VALUE_LABEL_SLICE.md`](GAP4_VALUE_LABEL_SLICE.md)
 
