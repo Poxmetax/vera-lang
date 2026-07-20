@@ -3,7 +3,7 @@
 **Date:** 2026-07-20  
 **Commit:** `4fbf7df` (TradingBot main; code + slice + KNOWN_GAPS + README promo defer)  
 **Publish:** merge `0bc3c22` on GitHub main / vera-lang subtree (`9fee15d` snapshot)  
-**Soft review docs:** *(this soft-docs commit — fill hash after soft commit in same session)*  
+**Soft review docs:** `7cf813f` (TradingBot main; this soft ACK + review/queue/checklist)  
 **Soft review:** PASS -- [`CLAUDE_REVIEW_GAPC1_SYM_LEN.md`](CLAUDE_REVIEW_GAPC1_SYM_LEN.md) / pointer [`CLAUDE_POINTER_GAPC1_REVIEW.md`](CLAUDE_POINTER_GAPC1_REVIEW.md)  
 **SoT:** [`GAPC1_SYM_LEN_SLICE.md`](GAPC1_SYM_LEN_SLICE.md)
 
