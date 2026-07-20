@@ -42,7 +42,7 @@ Tasks are machine-checkable (exit codes + substrings). Agents are expected to st
 
 **How to read this:** Fable shows the task set is runnable on a full local host. Mode B shows operator-mediated CLI paste works when the fixture is clean. Free-web SKIP(env) measures sandbox capability, not VERA surface quality. Do **not** treat rows as a model ranking.
 
-Internal detail notes (optional): [`RESULTS_FABLE_TRIAL_2026-07-20.md`](RESULTS_FABLE_TRIAL_2026-07-20.md).
+Internal detail notes (optional): [`RESULTS_FABLE_TRIAL_2026-07-20.md`](RESULTS_FABLE_TRIAL_2026-07-20.md). Gemini Mode B soft scoring notes: [`VERA_AGENT_BENCH_V01_GEMINI_MODE_B_2026-07-20.md`](../../../docs/pilot/VERA_AGENT_BENCH_V01_GEMINI_MODE_B_2026-07-20.md).
 
 ---
 
