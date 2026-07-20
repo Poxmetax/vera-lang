@@ -1,0 +1,15 @@
+// VERA Phase 2 soft demo ? intentionally unsupported SMT fragment (Str body).
+// Under --prove the ensures obligation is marked [RUNTIME-CHECKED], not [PROVED].
+// VC encoder only handles Int/Bool/ite; Str/Console stay runtime (see vc.rs encode_expr).
+
+fn tag() -> Str
+    ensures true
+{
+    "runtime-hint"
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    console.print(tag());
+}

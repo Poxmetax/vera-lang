@@ -1,0 +1,8 @@
+{
+  "id": "T01",
+  "name": "hello_console",
+  "bucket": "A",
+  "cli": ["run"],
+  "expect": { "stdout_contains": "Hello, VERA", "exit": 0 },
+  "claims": ["CLI run works on hello fixture"]
+}

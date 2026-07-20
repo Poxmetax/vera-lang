@@ -18,7 +18,7 @@ Public repo: [github.com/Poxmetax/vera-lang](https://github.com/Poxmetax/vera-la
 | **Refinements + prove** | Runtime checks + `vera --prove` / `--prove-run` via Z3 SMT-LIB2 subprocess |
 | **Content-addressed store** | Parse → hash → render → parse round-trip; typed edit transactions |
 | **FixPatch** | Ephemeral diagnostic/fix patch path (CONF-P2); **not** a durable proof cache |
-| **Label lattice** | Lattice pilot + thin seeded checker surface (E1/E6 rejects in typecheck) — **not** full IFC; no label syntax or inference |
+| **Label lattice** | Lattice + thin surface + minimal `T^{untrusted\|secret}` at param/let (feeds seeded pass) — **not** full IFC; no inference |
 
 This is a **research prototype**, not a production language. Do not read “pilot” as “information-flow control shipped.”
 
@@ -81,10 +81,13 @@ vera-lang/
 ├── Cargo.toml              — Rust workspace
 ├── crates/vera/            — reference toolchain (primary)
 ├── compiler/               — Python spike (reference only)
-├── examples/               — .vera programs
+├── examples/               — .vera programs (must typecheck)
+├── bench/                  — VeraAgentBench v0.1 (claim-less CLI probe)
 ├── docs/                   — research, spec, pilot evidence
 └── mcp/                    — Phase 3 stub (docs only)
 ```
+
+**Test baseline (soft):** `cargo test -p vera --lib` → **68** passed; `soft_smoke` PASS; `prove_clamp` → **6** proved. Debt: [`KNOWN_GAPS.md`](docs/pilot/KNOWN_GAPS.md).
 
 ## License
 

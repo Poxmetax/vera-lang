@@ -1,0 +1,15 @@
+// VERA Phase 2 soft demo — intentionally false Int ensures (SMT-encodable).
+// Under --prove Z3 finds a counterexample → [REFUTED], process exit 3.
+// No VC/typecheck edits; Int literal body + comparison goal only.
+
+fn bad() -> Int
+    ensures result > 0
+{
+    0
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    console.print(bad().show());
+}
