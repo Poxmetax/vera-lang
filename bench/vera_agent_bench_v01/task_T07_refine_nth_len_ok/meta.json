@@ -1,0 +1,8 @@
+{
+  "id": "T07",
+  "name": "refine_nth_len_ok",
+  "bucket": "A",
+  "cli": ["run"],
+  "expect": { "exit": 0 },
+  "claims": ["in-range nth with len refine runs"]
+}

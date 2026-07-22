@@ -1,0 +1,6 @@
+# Revisions to ignore in git blame (formatting-only churn).
+# Usage: git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub honors this file automatically for blame views.)
+
+# 2026-07-21 Format codebase with cargo fmt (no logic changes)
+ea3b3e2daaf664e125016bb46bd221d32aa1aab6

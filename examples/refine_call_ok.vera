@@ -1,0 +1,14 @@
+﻿// VERA [P2-REFINE1] — in-range refined call sites typecheck + run.
+// Out-of-range literals (e.g. pct=150) are rejected at typecheck; see unit tests
+// in crates/vera/src/typecheck.rs (refine1_rejects_out_of_range_literal_call).
+
+fn apply_discount(price: {p: Int | p >= 0}, pct: {d: Int | 0 <= d && d <= 100}) -> Int {
+    price - (price * pct) / 100
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    console.print(apply_discount(100, 10).show());
+    console.print(apply_discount(0, 0).show());
+}

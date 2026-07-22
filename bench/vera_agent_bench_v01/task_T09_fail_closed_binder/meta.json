@@ -1,0 +1,10 @@
+{
+  "id": "T09",
+  "name": "fail_closed_binder",
+  "bucket": "A",
+  "cli": ["--prove"],
+  "expect": { "exit": 1, "output_contains": "error:", "output_not_contains": "[PROVED]" },
+  "observed_reject": "error: 6:20: expected an identifier binder name, got \"r|s\"",
+  "claims": ["front-door reject of a non-identifier refinement binder; no [PROVED] output for an unparseable program"],
+  "not_claims": ["SMT-injection corpus demonstrated", "prover hardening beyond the landed fail-closed behavior", "exploit tooling"]
+}

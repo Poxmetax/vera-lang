@@ -1,0 +1,20 @@
+{
+  "name": "vera-lang",
+  "image": "mcr.microsoft.com/devcontainers/rust:1-1-bookworm",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends z3 && z3 --version && cargo build -p vera && ./target/debug/vera --help | head -n 5",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml"
+      ],
+      "settings": {
+        "rust-analyzer.cargo.features": "all"
+      }
+    }
+  },
+  "remoteUser": "vscode",
+  "forwardPorts": [],
+  "portsAttributes": {}
+}

@@ -1,0 +1,32 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0 -- C:\Program Files\Python313\python.exe
+hypothesis profile 'default'
+rootdir: <vera-lang checkout>/bench
+plugins: hypothesis-6.156.7
+collecting ... collected 23 items
+
+test_bucket1.py::test_baseline_ships_bug PASSED                          [  4%]
+test_bucket1.py::test_vera_contract_catches PASSED                       [  8%]
+test_bucket1.py::test_vera_property_holds PASSED                         [ 13%]
+test_bucket1.py::test_baseline_property_fails XFAIL (baseline violat...) [ 17%]
+test_bucket2.py::test_baseline_is_injectable PASSED                      [ 21%]
+test_bucket2.py::test_vera_sanitizer_blocks_injection PASSED             [ 26%]
+test_bucket2.py::test_vera_allows_benign_input PASSED                    [ 30%]
+test_bucket3.py::test_baseline_uses_weak_md5 PASSED                      [ 34%]
+test_bucket3.py::test_vera_uses_salted_kdf PASSED                        [ 39%]
+test_bucket3.py::test_vera_salt_is_random PASSED                         [ 43%]
+test_bucket4.py::test_baseline_leaks_into_status_and_json PASSED         [ 47%]
+test_bucket4.py::test_vera_secret_redacts_in_str PASSED                  [ 52%]
+test_bucket4.py::test_vera_secret_refuses_serialization PASSED           [ 56%]
+test_bucket5.py::test_baseline_happy_path_runs PASSED                    [ 60%]
+test_bucket5.py::test_baseline_explodes_on_missing_key PASSED            [ 65%]
+test_bucket5.py::test_vera_returns_err_on_missing_key PASSED             [ 69%]
+test_bucket5.py::test_vera_returns_ok_on_present_key PASSED              [ 73%]
+test_bucket6.py::test_baseline_negative_offset_silently_wrong PASSED     [ 78%]
+test_bucket6.py::test_baseline_large_offset_raises_at_runtime PASSED     [ 82%]
+test_bucket6.py::test_vera_rejects_negative_offset PASSED                [ 86%]
+test_bucket6.py::test_vera_rejects_out_of_range_offset PASSED            [ 91%]
+test_bucket6.py::test_vera_property_returns_correct_element PASSED       [ 95%]
+test_bucket6.py::test_baseline_property_fails_on_negative XFAIL (bas...) [100%]
+
+======================== 21 passed, 2 xfailed in 5.25s ========================

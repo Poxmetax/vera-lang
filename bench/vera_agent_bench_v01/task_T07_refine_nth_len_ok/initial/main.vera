@@ -1,0 +1,18 @@
+// VERA [P2-REFINE2] — REQ-REFINE-2: len(xs) as a measure in a refinement.
+// This in-range call typechecks and runs. A provably OOB literal index (e.g.
+// -1 here) is a compile-time type error with zero execution; see the refine2_*
+// unit tests in crates/vera/src/typecheck.rs. An index the checker cannot
+// bound stays guarded by the runtime refinement check (interp tests).
+
+fn nth(xs: List<Int>, i: {k: Int | 0 <= k && k < len(xs)}) -> Int {
+    match xs.get(i) {
+        Some(v) => v,
+        None => -1,
+    }
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    console.print(nth([10, 20, 30], 1).show());
+}

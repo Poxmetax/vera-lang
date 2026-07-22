@@ -1,0 +1,61 @@
+# Minimal Linux x86_64 vera CLI release asset for agents that can curl.
+# Does not replace Codespace; helps Mode C / network-capable hosts.
+name: release-cli
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# [CI-HARDEN] Least privilege: workflow default is read; the build job elevates
+# to write only for the release-attach step below.
+permissions:
+  contents: read
+
+jobs:
+  build-linux-x86_64:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        # [CI-HARDEN] pinned to the commit v7.0.1 pointed at (Dependabot #4).
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust toolchain
+        # [CI-HARDEN] `stable` is a moving branch; pin the resolved commit.
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable @ 2026-07-20
+
+      - name: Install Z3 (prove path; build itself does not link Z3)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends z3
+          z3 --version
+
+      - name: Build release binary
+        run: cargo build -p vera --release
+
+      - name: Stage named asset
+        run: |
+          mkdir -p dist
+          cp target/release/vera dist/vera-linux-x86_64
+          chmod +x dist/vera-linux-x86_64
+          ./dist/vera-linux-x86_64 --help | head -n 5
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vera-linux-x86_64
+          path: dist/vera-linux-x86_64
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          files: dist/vera-linux-x86_64
+          fail_on_unmatched_files: true
+          generate_release_notes: true

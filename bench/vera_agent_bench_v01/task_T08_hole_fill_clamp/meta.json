@@ -1,0 +1,9 @@
+{
+  "id": "T08",
+  "name": "hole_fill_clamp",
+  "bucket": "B_thin",
+  "cli": ["run"],
+  "expect": { "after_fill_exit": 0 },
+  "claims": ["agent may fill typed hole by editing source"],
+  "not_claims": ["synthesis", "automatic hole resolution product"]
+}

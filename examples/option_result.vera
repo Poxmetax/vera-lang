@@ -1,0 +1,33 @@
+// VERA Phase 1 — Option / Result + exhaustive match
+
+fn describe(x: Option<Int>) -> Str {
+    match x {
+        Some(n) => if n > 0 { "pos" } else { "nonpos" },
+        None => "none",
+    }
+}
+
+fn div(a: Int, b: Int) -> Result<Int, Str> {
+    if b == 0 {
+        Err("zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn show_result(r: Result<Int, Str>) -> Str {
+    match r {
+        Ok(n) => if n == 0 { "zero" } else { "nonzero" },
+        Err(e) => e,
+    }
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    console.print(describe(Some(3)));
+    console.print(describe(Some(0)));
+    console.print(describe(None));
+    console.print(show_result(div(10, 2)));
+    console.print(show_result(div(1, 0)));
+}

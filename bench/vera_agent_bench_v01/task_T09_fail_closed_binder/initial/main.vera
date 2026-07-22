@@ -1,0 +1,14 @@
+// VERA — T09 fail-closed binder (R1 spirit, front-door fragment)
+// A refinement binder must be an identifier. A string-literal binder is
+// rejected at parse time — the toolchain must NOT print any [PROVED] line
+// for a program it could not even parse (no forged proof surface).
+
+fn bad(x: Int) -> {"r|s": Int | x > 0} {
+    x
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    console.print("never");
+}

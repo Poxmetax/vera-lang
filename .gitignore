@@ -1,0 +1,17 @@
+/target/
+**/*.rs.bk
+**/*.bak_*
+**/__pycache__/
+*.py[cod]
+_probe/
+_operator_archive/
+docs/pilot/
+.vera-cache*/
+.vera-cache-*
+# Local Claude Code review harness -- machine-local runtime stays out of the
+# public tree; .claude/agents/ and .claude/commands/ are intentionally NOT
+# ignored so they can be shared later if gated.
+.claude/settings.json
+.claude/hooks/
+.claude/state/
+specs/ACTIVE

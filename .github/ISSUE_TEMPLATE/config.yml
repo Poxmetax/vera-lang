@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Honesty rules / claim-less docs
+    url: https://github.com/Poxmetax/vera-lang/blob/main/README.md
+    about: Read the claim-less README and AGENTS.md before filing a feature or bug report.
+  - name: Security advisories
+    url: https://github.com/Poxmetax/vera-lang/security/advisories/new
+    about: Prefer private disclosure for security-sensitive reports (see SECURITY.md).

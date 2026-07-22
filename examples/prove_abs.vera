@@ -1,0 +1,25 @@
+// VERA soft demo — SMT-proved non-negative absolute value (Int ite + unary minus).
+// Under --prove Z3 discharges return refinement + ensures on the Int fragment.
+// Honest limits: not a full abs library; no BitVec/overflow model; not IFC/labels.
+
+fn abs_nonneg(x: Int) -> {r: Int | r >= 0}
+    ensures result >= 0
+{
+    if x < 0 {
+        -x
+    } else {
+        x
+    }
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    let a: Int = abs_nonneg(-7);
+    let b: Int = abs_nonneg(0);
+    let c: Int = abs_nonneg(4);
+    console.print("prove_abs");
+    console.print(a.show());
+    console.print(b.show());
+    console.print(c.show());
+}

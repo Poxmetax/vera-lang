@@ -1,0 +1,8 @@
+{
+  "id": "T03",
+  "name": "prove_refuted_false_ensures",
+  "bucket": "A",
+  "cli": ["--prove"],
+  "expect": { "has_refuted": true, "exit": 3 },
+  "claims": ["false ensures are REFUTED with exit 3"]
+}

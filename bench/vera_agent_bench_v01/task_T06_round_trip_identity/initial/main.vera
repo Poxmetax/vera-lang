@@ -1,0 +1,18 @@
+// VERA — T06' paren round-trip honesty (GAP-3 spirit)
+// Mixed-precedence shapes must round-trip AST-identically:
+// parse -> hash -> render -> parse -> hash, equal program hashes,
+// with no redundant parentheses reintroduced by the renderer.
+
+fn paren_mix(a: Int, b: Int, c: Int) -> Int {
+    let d: Int = (a + b) * c;
+    let e: Int = a - (b - c);
+    let f: Int = (a + b) * (c + a) - a * b + c;
+    if (a + b) * c >= a * (b + c) { d + e - f } else { (d - e) * (f - a) }
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    let _r: Int = paren_mix(1, 2, 3);
+    console.print("parens ok");
+}

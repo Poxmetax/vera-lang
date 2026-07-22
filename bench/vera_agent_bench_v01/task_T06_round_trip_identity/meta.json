@@ -1,0 +1,9 @@
+{
+  "id": "T06",
+  "name": "round_trip_paren_identity",
+  "bucket": "A",
+  "cli": ["--round-trip"],
+  "expect": { "stdout_contains": "round-trip OK", "exit": 0 },
+  "claims": ["precedence-aware render round-trips mixed-paren shapes AST-identically (GAP-3 spirit)"],
+  "not_claims": ["general formatting stability", "string-escape round-trip beyond the F6 transport set (alternate seed, not scored here)"]
+}

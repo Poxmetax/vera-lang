@@ -1,0 +1,27 @@
+// VERA Phase 1 — postfix `?` propagation (Option)
+
+fn dig(xs: List<Int>) -> Option<Int> {
+    let h: Int = xs.head()?;
+    Some(h)
+}
+
+fn head_or_zero(xs: List<Int>) -> Int {
+    match xs.head() {
+        Some(n) => n,
+        None => 0,
+    }
+}
+
+fn main(console: Console) -> Unit
+    uses {console}
+{
+    console.print(match dig([7, 8]) {
+        Some(n) => n.show(),
+        None => "none",
+    });
+    console.print(match dig([]) {
+        Some(n) => n.show(),
+        None => "none",
+    });
+    console.print(head_or_zero([3]).show());
+}

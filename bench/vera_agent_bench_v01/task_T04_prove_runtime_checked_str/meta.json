@@ -1,0 +1,8 @@
+{
+  "id": "T04",
+  "name": "prove_runtime_checked_str",
+  "bucket": "A",
+  "cli": ["--prove"],
+  "expect": { "min_runtime_checked": 1, "exit": 0 },
+  "claims": ["unsupported SMT fragment stays RUNTIME-CHECKED"]
+}

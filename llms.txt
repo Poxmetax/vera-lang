@@ -1,0 +1,13 @@
+# llms.txt — VERA (published trial pack)
+
+> **Status: published trial pack (claim-less)** — research-prototype probe, not a leaderboard.
+> Not IFC-done. Not MCP compiler service. Not cache-skip / durable-store speed headline.
+
+Vera: research-prototype CLI (run, --prove, --diag-json, --round-trip).
+Honesty: PROVED / REFUTED / RUNTIME-CHECKED are distinct; not “all green.”
+Not: IFC-done, durable FixPatch product, hole synthesis, MCP server, cache-skip speed leaderboard.
+
+Entrypoint: AGENTS.md
+Bench: bench/README.md and bench/vera_agent_bench_v01/
+
+Scored core: T02 T03 T04 T05 T06' T08 T09 — see bench/README.md.

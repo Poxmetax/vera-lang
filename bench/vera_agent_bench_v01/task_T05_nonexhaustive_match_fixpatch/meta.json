@@ -1,0 +1,13 @@
+{
+  "id": "T05",
+  "name": "nonexhaustive_match_fixpatch",
+  "bucket": "B_thin",
+  "cli": ["--diag-json", "run"],
+  "expect": {
+    "diag_fix_kind": "add-match-arms",
+    "diag_ephemeral": true,
+    "after_edit_exit": 0
+  },
+  "claims": ["ephemeral add-match-arms FixPatch appears; agent may edit arms"],
+  "not_claims": ["durable FixPatch", "multi-kind RepairPlan", "GAP-D2"]
+}
